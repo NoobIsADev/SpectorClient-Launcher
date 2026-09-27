@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.3",
-  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with safe verified GitHub auto-updates",
+  "version": "1.6.5",
+  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with hardened automatic Windows updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
@@ -40,8 +40,7 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "artifactName": "SpectorClient-${version}-${arch}.${ext}",
       "icon": "build/icon.png"

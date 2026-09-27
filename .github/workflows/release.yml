@@ -40,37 +40,51 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      # Build locally only. Publishing from electron-builder caused the EXE,
-      # blockmap and latest.yml publishers to race while creating the same
-      # GitHub Release. We publish exactly once in the steps below instead.
+      - name: Syntax check launcher
+        shell: pwsh
+        run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer.js
+          node --check src/logs.js
+
       - name: Build NSIS updater artifacts
         run: npm run build:release
 
-      - name: Verify updater artifacts before publishing
+      - name: Verify updater artifacts and checksums before publishing
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $required = @(
-            "dist/SpectorClient-$version-x64.exe",
-            "dist/SpectorClient-$version-x64.exe.blockmap",
-            "dist/latest.yml"
-          )
+          $exe = "dist/SpectorClient-$version-x64.exe"
+          $blockmap = "$exe.blockmap"
+          $latestPath = "dist/latest.yml"
+          $required = @($exe, $blockmap, $latestPath)
 
           foreach ($file in $required) {
-            if (-not (Test-Path -LiteralPath $file)) {
-              throw "Required update artifact is missing: $file"
-            }
+            if (-not (Test-Path -LiteralPath $file)) { throw "Required update artifact is missing: $file" }
             $size = (Get-Item -LiteralPath $file).Length
-            if ($size -le 0) {
-              throw "Required update artifact is empty: $file"
-            }
+            if ($size -le 0) { throw "Required update artifact is empty: $file" }
             Write-Host "Verified $file ($size bytes)"
           }
 
-          $latest = Get-Content -LiteralPath 'dist/latest.yml' -Raw
+          $latest = Get-Content -LiteralPath $latestPath -Raw
           if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
-            throw "dist/latest.yml does not advertise version $version"
+            throw "latest.yml does not advertise version $version"
           }
+          if ($latest -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) {
+            throw "latest.yml does not reference the expected installer"
+          }
+
+          $sha512Line = [regex]::Match($latest, '(?m)^\s*sha512:\s*([^\r\n]+)')
+          if (-not $sha512Line.Success) { throw 'latest.yml does not contain an installer sha512' }
+          $manifestSha512 = $sha512Line.Groups[1].Value.Trim().Trim('"').Trim("'")
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
+          $hash = [System.Security.Cryptography.SHA512]::HashData($bytes)
+          $actualSha512 = [Convert]::ToBase64String($hash)
+          if ($actualSha512 -ne $manifestSha512) {
+            throw 'latest.yml sha512 does not match the built installer'
+          }
+          Write-Host 'latest.yml checksum matches the NSIS installer.'
 
       - name: Create clean draft release
         shell: pwsh
@@ -80,8 +94,6 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $version = "${{ steps.version.outputs.version }}"
 
-          # A rerun may find a partial release from a previous failed attempt.
-          # Remove only the release object; the Git tag remains intact.
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Removing existing release object for $tag before rebuilding it..."
@@ -106,33 +118,37 @@ jobs:
             --clobber
           if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts for $tag" }
 
-      - name: Verify draft release assets
+      - name: Verify uploaded release assets and digests
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
           $version = "${{ steps.version.outputs.version }}"
-          $required = @(
+          $expectedFiles = @(
             "SpectorClient-$version-x64.exe",
             "SpectorClient-$version-x64.exe.blockmap",
             "latest.yml"
           )
 
-          $json = gh release view $tag --json assets
-          if ($LASTEXITCODE -ne 0) { throw "Could not read draft release assets for $tag" }
-          $release = $json | ConvertFrom-Json
-          $names = @($release.assets | ForEach-Object { $_.name })
-
-          foreach ($name in $required) {
-            if ($names -notcontains $name) {
-              throw "Draft release is missing required asset: $name"
-            }
-            Write-Host "Release contains $name"
+          $release = gh api "repos/${{ github.repository }}/releases/tags/$tag" | ConvertFrom-Json
+          $assets = @($release.assets)
+          foreach ($name in $expectedFiles) {
+            $asset = $assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $asset) { throw "Draft release is missing required asset: $name" }
+            if ([int64]$asset.size -le 0) { throw "Draft release asset is empty: $name" }
+            Write-Host "Release contains $name ($($asset.size) bytes)"
           }
 
-      # Only make the release visible to electron-updater after all three files
-      # exist. This prevents clients from seeing a half-published release.
+          $exeName = "SpectorClient-$version-x64.exe"
+          $exeAsset = $assets | Where-Object { $_.name -eq $exeName } | Select-Object -First 1
+          if ($exeAsset.digest -and $exeAsset.digest -match '^sha256:(.+)$') {
+            $remoteSha = $Matches[1].ToLowerInvariant()
+            $localSha = (Get-FileHash "dist/$exeName" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($remoteSha -ne $localSha) { throw 'Uploaded installer SHA256 does not match the local build' }
+            Write-Host 'Uploaded installer digest matches the local build.'
+          }
+
       - name: Publish verified release
         shell: pwsh
         env:
@@ -141,3 +157,47 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw "Could not publish verified release $tag" }
+
+      - name: Verify public auto-update endpoint
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $latestUrl = "https://github.com/${{ github.repository }}/releases/latest/download/latest.yml"
+          $installerUrl = "https://github.com/${{ github.repository }}/releases/latest/download/SpectorClient-$version-x64.exe"
+          $ok = $false
+          $lastError = $null
+
+          for ($attempt = 1; $attempt -le 12; $attempt++) {
+            try {
+              Write-Host "Public updater verification attempt $attempt..."
+              $latestResponse = Invoke-WebRequest -Uri $latestUrl -Headers @{ 'Cache-Control'='no-cache'; 'User-Agent'='SpectorClient-Release-Verification' } -MaximumRedirection 10
+              $latestText = [string]$latestResponse.Content
+              if ($latestResponse.StatusCode -ne 200) { throw "latest.yml returned HTTP $($latestResponse.StatusCode)" }
+              if ($latestText -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") { throw "public latest.yml is not version $version" }
+              if ($latestText -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) { throw 'public latest.yml points to the wrong installer' }
+
+              $head = Invoke-WebRequest -Uri $installerUrl -Method Head -Headers @{ 'Cache-Control'='no-cache'; 'User-Agent'='SpectorClient-Release-Verification' } -MaximumRedirection 10
+              if ($head.StatusCode -lt 200 -or $head.StatusCode -ge 400) { throw "installer returned HTTP $($head.StatusCode)" }
+
+              $apiRelease = gh api "repos/${{ github.repository }}/releases/latest" | ConvertFrom-Json
+              if ($apiRelease.tag_name -ne $tag) { throw "GitHub latest release is $($apiRelease.tag_name), expected $tag" }
+              if ($apiRelease.draft -or $apiRelease.prerelease) { throw 'latest release is not a normal published release' }
+
+              $ok = $true
+              break
+            } catch {
+              $lastError = $_
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          if (-not $ok) {
+            Write-Host 'Public updater verification failed. Returning this release to draft so clients cannot see it.' -ForegroundColor Red
+            gh release edit $tag --draft=true
+            throw "Public updater verification failed: $lastError"
+          }
+
+          Write-Host "Public auto-update endpoint is healthy for SpectorClient $version." -ForegroundColor Green

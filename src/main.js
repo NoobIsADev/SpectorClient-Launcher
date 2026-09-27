@@ -21,6 +21,8 @@ const MODRINTH_API = 'https://api.modrinth.com/v2';
 const USER_AGENT = `SpectorClient/${app.getVersion()} (Electron Minecraft launcher)`;
 const MODRINTH_PAGE_SIZE = 24;
 const JAVA_MAJOR = 25;
+const UPDATE_REPO_OWNER = 'NoobIsADev';
+const UPDATE_REPO_NAME = 'SpectorClient-Launcher';
 
 // Keep this client completely separate from the normal .minecraft folder.
 const APPDATA_ROOT = process.env.APPDATA
@@ -49,6 +51,8 @@ let lastUpdaterProgressBucket = -1;
 let downloadedUpdateInfo = null;
 let updateInstallPending = false;
 let updateInstallStarting = false;
+let updateDownloadInProgress = false;
+let backgroundForUpdate = false;
 let gameLaunchInProgress = false;
 let lastUpdaterErrorFingerprint = '';
 let lastUpdaterErrorAt = 0;
@@ -435,18 +439,26 @@ function createWindow() {
   mainWindow.on('leave-full-screen', reapplyScale);
   mainWindow.on('resize', () => scheduleFitScale());
 
-  // If an update is already downloaded while Minecraft is active, keep the
-  // launcher alive in the background so it can install the update the instant
-  // the game exits. Closing the window simply hides it until then.
+  // Do not let a user accidentally kill an update that is already downloading.
+  // If Minecraft is active we also keep the launcher alive in the background so
+  // the downloaded update can install the instant the game exits.
   mainWindow.on('close', (event) => {
-    if (updateInstallPending && !updateInstallStarting && (isMinecraftRunning() || gameLaunchInProgress)) {
+    const updaterBusy = updateDownloadInProgress || updateInstallPending;
+    if (updaterBusy && !updateInstallStarting) {
       event.preventDefault();
+      backgroundForUpdate = true;
       mainWindow.hide();
-      log('[Updater] Update is ready. SpectorClient will stay in the background until Minecraft closes.', 'updater');
-      emitUpdateState('waiting-for-game', {
-        version: downloadedUpdateInfo?.version || null,
-        text: 'Update ready. Waiting for Minecraft to close before installing…'
-      });
+
+      if (updateInstallPending && (isMinecraftRunning() || gameLaunchInProgress)) {
+        log('[Updater] Update is ready. SpectorClient will stay in the background until Minecraft closes.', 'updater');
+        emitUpdateState('waiting-for-game', {
+          version: downloadedUpdateInfo?.version || null,
+          text: 'Update ready. Waiting for Minecraft to close before installing…'
+        });
+      } else if (updateDownloadInProgress) {
+        log('[Updater] Finishing the launcher update in the background…', 'updater');
+        emitUpdateState('downloading', { text: 'Finishing the launcher update in the background…' });
+      }
     }
   });
 
@@ -622,9 +634,11 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
   // electron-updater closes the launcher and runs the NSIS installer.
   setTimeout(() => {
     try {
-      autoUpdater.quitAndInstall(false, true);
+      autoUpdater.quitAndInstall(true, true);
     } catch (error) {
       updateInstallStarting = false;
+      backgroundForUpdate = false;
+      if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
       const message = error?.message || String(error);
       log(`[Updater] Could not start the update installer: ${message}`, 'updater');
       emitUpdateState('error', { text: `Could not install launcher update: ${message}` });
@@ -690,14 +704,53 @@ function handleUpdaterError(error, context = 'Update check failed') {
   emitUpdateState(detail.state, { text: detail.text });
 }
 
+function verifyPackagedUpdateConfig() {
+  const configPath = path.join(process.resourcesPath, 'app-update.yml');
+  try {
+    const config = fs.readFileSync(configPath, 'utf8');
+    const providerOk = /(?:^|\n)provider:\s*github\s*(?:\n|$)/i.test(config);
+    const ownerOk = new RegExp(`(?:^|\n)owner:\s*[\"']?${UPDATE_REPO_OWNER}[\"']?\s*(?:\n|$)`, 'i').test(config);
+    const repoOk = new RegExp(`(?:^|\n)repo:\s*[\"']?${UPDATE_REPO_NAME}[\"']?\s*(?:\n|$)`, 'i').test(config);
+    if (!providerOk || !ownerOk || !repoOk) {
+      throw new Error(`app-update.yml does not point to ${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}`);
+    }
+    log(`[Updater] Packaged update configuration verified: ${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}.`, 'updater');
+    return true;
+  } catch (error) {
+    log(`[Updater] Packaged update configuration problem: ${error?.message || error}`, 'updater');
+    emitUpdateState('error', { text: 'This SpectorClient build is missing valid automatic-update configuration.' });
+    return false;
+  }
+}
+
 function setupAutoUpdater() {
   if (updaterInitialized || !app.isPackaged) {
-    if (!app.isPackaged) log('[Updater] Development build detected; automatic updates are disabled.', 'updater');
+    if (!app.isPackaged) log(`[Updater] Development build ${app.getVersion()} detected; automatic app replacement is disabled. Install the NSIS EXE to test auto-updates.`, 'updater');
     return;
   }
 
   updaterInitialized = true;
+
+  // electron-builder embeds the canonical publish provider in app-update.yml.
+  // Using that generated file is the officially supported electron-updater path
+  // and avoids runtime feed overrides drifting from the release configuration.
+  verifyPackagedUpdateConfig();
+
+  // Avoid stale release metadata when a new release has just been published.
+  autoUpdater.requestHeaders = {
+    ...(autoUpdater.requestHeaders || {}),
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache'
+  };
+
+  log(`[Updater] Automatic updates enabled. Installed launcher version: ${app.getVersion()}.`, 'updater');
+  log(`[Updater] Update source: ${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}.`, 'updater');
+
   autoUpdater.autoDownload = true;
+  // Reliability over bandwidth: always download the complete NSIS installer.
+  // This removes differential/blockmap patching as a possible failure point.
+  autoUpdater.disableDifferentialDownload = true;
+  autoUpdater.allowDowngrade = false;
   // We intentionally control installation ourselves. This prevents an update
   // from installing merely because the launcher is closed while Minecraft is
   // still running.
@@ -710,6 +763,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-available', (info) => {
+    updateDownloadInProgress = true;
     lastUpdaterProgressBucket = -1;
     log(`[Updater] SpectorClient ${info.version} is available. Downloading immediately…`, 'updater');
     emitUpdateState('available', {
@@ -719,12 +773,14 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    updateDownloadInProgress = false;
     const version = info?.version || app.getVersion();
     log(`[Updater] SpectorClient ${version} is up to date.`, 'updater');
     emitUpdateState('current', { version, text: 'SpectorClient is up to date.' });
   });
 
   autoUpdater.on('download-progress', (progress) => {
+    updateDownloadInProgress = true;
     const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
     const bucket = Math.floor(percent / 10);
     if (bucket !== lastUpdaterProgressBucket || percent === 100) {
@@ -738,6 +794,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    updateDownloadInProgress = false;
     downloadedUpdateInfo = makeIpcSafe(info || {});
     updateInstallPending = true;
     const version = info?.version || 'new version';
@@ -761,6 +818,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
+    if (!updateInstallPending) updateDownloadInProgress = false;
     handleUpdaterError(error, 'Update check failed');
   });
 
@@ -780,10 +838,11 @@ function setupAutoUpdater() {
   };
 
   // GitHub Releases is polled because desktop clients do not receive a push
-  // notification from GitHub. Check almost immediately, then once per minute so
-  // a newly-published release normally reaches an open launcher within ~60 sec.
-  setTimeout(check, 1000).unref?.();
-  updaterInterval = setInterval(check, 60 * 1000);
+  // notification from GitHub. Check almost immediately, then every 15 seconds.
+  // The release workflow only exposes a version after all updater artifacts pass
+  // verification, so frequent checks cannot observe a half-published release.
+  setTimeout(check, 750).unref?.();
+  updaterInterval = setInterval(check, 15 * 1000);
   updaterInterval.unref?.();
 }
 
@@ -1639,6 +1698,12 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
         return;
       }
 
+      if (backgroundForUpdate && updateDownloadInProgress) {
+        log('[Updater] Minecraft closed. Finishing the launcher update download before installing.', 'updater');
+        return;
+      }
+
+      backgroundForUpdate = false;
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
     });
     return { ok: true };
