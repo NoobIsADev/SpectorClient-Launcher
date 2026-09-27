@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:;" />
+  <title>SpectorClient</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div class="cave-layer cave-left"></div>
+    <div class="cave-layer cave-right"></div>
+    <div class="cave-glow glow-a"></div>
+    <div class="cave-glow glow-b"></div>
+
+    <aside class="icon-rail">
+      <div class="rail-logo" title="SpectorClient"><img class="brand-logo-img" src="assets/spector-logo.png" alt="SpectorClient" /></div>
+
+      <nav class="rail-nav" aria-label="Launcher sections">
+        <button class="rail-btn active" data-view="home" title="Play" aria-label="Play">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2L18.5 12 8 5.4Z"/></svg>
+        </button>
+        <button class="rail-btn" data-view="mods" title="Mods" aria-label="Mods">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8v3h3v5h-3v2h3v5h-3v3H8v-3H5v-5h3v-2H5V6h3V3Zm2 5v8h4V8h-4Z"/></svg>
+        </button>
+        <button class="rail-btn" data-view="accounts" title="Accounts" aria-label="Accounts">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Z"/></svg>
+        </button>
+      </nav>
+
+      <div class="rail-bottom">
+        <button id="openFolderRailBtn" class="rail-btn" title="Open SpectorClient folder" aria-label="Open client folder">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3V6Zm2 4v6h14v-6H5Z"/></svg>
+        </button>
+        <button class="rail-btn" data-view="settings" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10.8 2 2.4 0 .6 2.1c.5.2 1 .4 1.5.7L17.2 4 19 5.8l-.8 1.9c.3.5.5 1 .7 1.5l2.1.6v2.4l-2.1.6c-.2.5-.4 1-.7 1.5l.8 1.9-1.8 1.8-1.9-.8c-.5.3-1 .5-1.5.7l-.6 2.1h-2.4l-.6-2.1a8 8 0 0 1-1.5-.7l-1.9.8L5 16.2l.8-1.9a8 8 0 0 1-.7-1.5L3 12.2V9.8l2.1-.6c.2-.5.4-1 .7-1.5L5 5.8 6.8 4l1.9.8c.5-.3 1-.5 1.5-.7L10.8 2ZM12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <header class="topbar drag-region">
+      <div class="client-title">
+        <img class="top-brand-logo" src="assets/spector-logo.png" alt="" />
+        <span class="client-title-main">SPECTOR</span><span class="client-title-accent">CLIENT</span>
+      </div>
+
+      <div class="top-actions no-drag">
+        <div class="account-switch-wrap">
+          <button id="accountSwitcher" class="account-switcher">
+            <span id="topAccountAvatar" class="tiny-avatar placeholder">?</span>
+            <span class="account-switch-copy"><small>ACCOUNT</small><b id="topAccountName">Sign in</b></span>
+            <span class="chevron">⌄</span>
+          </button>
+          <div id="accountDropdown" class="account-dropdown hidden"></div>
+        </div>
+
+        <div class="window-controls">
+          <button id="minimizeBtn" class="window-btn" title="Minimize">—</button>
+          <button id="maximizeBtn" class="window-btn" title="Maximize">□</button>
+          <button id="closeBtn" class="window-btn close" title="Close">×</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section id="view-home" class="view home-view active">
+        <div class="home-stage">
+          <div class="player-heading">
+            <div class="overline">SIGNED IN AS</div>
+            <h1 id="homeAccountName">No account selected</h1>
+          </div>
+
+          <div class="skin-display">
+            <div class="skin-scene-background" aria-hidden="true"></div>
+            <div class="skin-halo"></div>
+            <div class="crystal crystal-one"></div>
+            <div class="crystal crystal-two"></div>
+            <div class="crystal crystal-three"></div>
+            <div id="skinPlaceholder" class="skin-placeholder">
+              <span>?</span>
+              <small>MICROSOFT ACCOUNT REQUIRED</small>
+            </div>
+            <canvas id="skinViewerCanvas" class="player-skin-viewer hidden" aria-label="Interactive Minecraft skin preview"></canvas>
+            <img id="playerSkinFallback" class="player-skin hidden" alt="Minecraft skin" />
+            <div id="skinDragHint" class="skin-drag-hint hidden">DRAG TO ROTATE • 360°</div>
+          </div>
+
+          <div class="launch-zone">
+            <div class="play-cluster">
+              <button id="playBtn" class="play-main" disabled>
+                <span class="play-icon">▶</span>
+                <span><b>PLAY</b><small id="playSubtext">Sign in with Microsoft first</small></span>
+              </button>
+              <button id="versionBtn" class="version-button" title="This build is locked to Minecraft 26.2">
+                <small>VERSION</small><b>26.2</b><span>FABRIC</span>
+              </button>
+            </div>
+            <div id="status" class="launch-status">Ready.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-mods" class="view scroll-view">
+        <div class="section-head">
+          <div>
+            <div class="overline">MOD MANAGER</div>
+            <h2>Mods</h2>
+            <p>Installed mods live in <code>%APPDATA%\spectorclient\mods</code>. Search Modrinth below for Fabric 26.2 mods.</p>
+          </div>
+          <button id="openModsFolderBtn" class="secondary-btn">Open mods folder</button>
+        </div>
+
+        <div class="mods-toolbar">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+            <input id="modSearchInput" maxlength="100" placeholder="Search Modrinth for Fabric 26.2 mods..." />
+            <button id="modSearchBtn" class="accent-btn">Search</button>
+          </div>
+          <div id="modManagerStatus" class="manager-status">Ready.</div>
+        </div>
+
+        <div class="mod-section-title">
+          <div><h3>Installed</h3><span id="installedCount">0 mods</span></div>
+          <button id="refreshModsBtn" class="text-btn">Refresh</button>
+        </div>
+        <div id="installedMods" class="installed-list"></div>
+
+        <div class="mod-section-title browser-title">
+          <div><h3>Browse Modrinth</h3><span>Only Fabric + Minecraft 26.2 results</span></div>
+        </div>
+        <div id="modSearchResults" class="mod-results">
+          <div class="empty-state compact-empty"><b>Search for a mod</b><span>Try Sodium, Iris, Mod Menu, or any other Fabric mod.</span></div>
+        </div>
+        <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
+      </section>
+
+      <section id="view-accounts" class="view scroll-view">
+        <div class="section-head">
+          <div>
+            <div class="overline">MICROSOFT IDENTITY</div>
+            <h2>Accounts</h2>
+            <p>Sign-in happens in Microsoft's browser/device-code flow. SpectorClient never asks for your Microsoft password.</p>
+          </div>
+          <button id="addAccountBtn" class="accent-btn">+ Add Microsoft account</button>
+        </div>
+        <div id="accountsList" class="account-grid"></div>
+      </section>
+
+      <section id="view-settings" class="view scroll-view">
+        <div class="section-head">
+          <div>
+            <div class="overline">CLIENT CONFIGURATION</div>
+            <h2>Settings</h2>
+            <p>The game directory and version are fixed for this SpectorClient build.</p>
+          </div>
+          <button id="saveSettingsBtn" class="accent-btn">Save settings</button>
+        </div>
+
+        <div class="settings-grid">
+          <div class="setting-card">
+            <h3>Memory</h3>
+            <div class="two-col">
+              <label>Minimum RAM (GB)<input id="minRamGb" type="number" min="2" max="64" /></label>
+              <label>Maximum RAM (GB)<input id="maxRamGb" type="number" min="2" max="64" /></label>
+            </div>
+          </div>
+
+          <div class="setting-card">
+            <h3>Window</h3>
+            <div class="two-col">
+              <label>Width<input id="width" type="number" min="640" /></label>
+              <label>Height<input id="height" type="number" min="480" /></label>
+            </div>
+            <label class="check-row"><input id="fullscreen" type="checkbox" /> Start fullscreen</label>
+          </div>
+
+          <div class="setting-card">
+            <h3>Launcher scale</h3>
+            <div class="range-heading"><span>UI scale</span><b id="uiScaleValue">100%</b></div>
+            <input id="uiScale" class="setting-range" type="range" min="60" max="180" step="10" value="100" />
+            <p class="hint">Use <kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>Ctrl</kbd> + <kbd>-</kbd>. Your preferred scale is saved. Maximized/fullscreen automatically scales down only when needed to keep the full launcher visible.</p>
+          </div>
+
+          <div class="setting-card">
+            <h3>Appearance & sounds</h3>
+            <label class="check-row"><input id="animationsEnabled" type="checkbox" checked /> Enable subtle animations</label>
+            <label class="check-row"><input id="soundsEnabled" type="checkbox" checked /> Enable launcher sounds</label>
+            <div class="sound-volume-wrap">
+              <div class="range-heading"><span>Sound volume</span><b id="soundVolumeValue">42%</b></div>
+              <input id="soundVolume" class="setting-range" type="range" min="0" max="100" step="1" value="42" />
+            </div>
+            <p class="hint">Sounds include hover/click feedback, Play/Stop cues, successful launches, errors, and mod actions.</p>
+          </div>
+
+
+          <div class="setting-card full-card theme-setting-card">
+            <div class="theme-setting-head">
+              <div>
+                <h3>Launcher theme</h3>
+                <p class="hint">Choose the accent style for the entire SpectorClient launcher.</p>
+              </div>
+              <b id="themeNameValue" class="theme-name-value">Classic</b>
+            </div>
+            <div class="theme-picker" role="radiogroup" aria-label="Launcher theme">
+              <button type="button" class="theme-option active" data-theme-option="classic" role="radio" aria-checked="true">
+                <span class="theme-preview theme-preview-classic"><i></i><i></i><i></i></span>
+                <span><b>Classic</b><small>Light blue</small></span>
+                <em>✓</em>
+              </button>
+              <button type="button" class="theme-option" data-theme-option="classic-pink" role="radio" aria-checked="false">
+                <span class="theme-preview theme-preview-classic-pink"><i></i><i></i><i></i></span>
+                <span><b>Classic Pink</b><small>Light pink</small></span>
+                <em>✓</em>
+              </button>
+              <button type="button" class="theme-option" data-theme-option="crimson" role="radio" aria-checked="false">
+                <span class="theme-preview theme-preview-crimson"><i></i><i></i><i></i></span>
+                <span><b>Crimson</b><small>Deep red</small></span>
+                <em>✓</em>
+              </button>
+              <button type="button" class="theme-option" data-theme-option="prince" role="radio" aria-checked="false">
+                <span class="theme-preview theme-preview-prince"><i></i><i></i><i></i></span>
+                <span><b>Prince</b><small>Royal gold</small></span>
+                <em>✓</em>
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-card full-card">
+            <h3>Java 25</h3>
+            <label>Java executable</label>
+            <div class="field-action"><input id="javaPath" placeholder="Automatic: SpectorClient managed Java 25" /><button id="chooseJavaBtn" class="secondary-btn">Browse</button></div>
+            <p class="hint">SpectorClient automatically installs its own Java 25 runtime on first launch. Leave this blank to use it, or Browse to override it with your own Java 25 executable.</p>
+          </div>
+
+          <div class="setting-card full-card">
+            <h3>Quick connect</h3>
+            <label>Server address<input id="serverAddress" placeholder="play.example.net (optional)" /></label>
+          </div>
+
+          <div class="setting-card full-card">
+            <h3>SpectorClient directory</h3>
+            <div class="path-row"><code id="gameDirectory">%APPDATA%\spectorclient</code><button id="openClientFolderBtn" class="secondary-btn">Open folder</button></div>
+          </div>
+
+          <div class="setting-card">
+            <h3>Behavior</h3>
+            <label class="check-row"><input id="closeLauncherOnStart" type="checkbox" /> Hide launcher while Minecraft runs</label>
+            <p class="hint">The Logs window opens automatically whenever you launch Minecraft.</p>
+          </div>
+
+          <div class="setting-card">
+            <h3>Fixed client stack</h3>
+            <div class="stack-row"><span>Minecraft</span><b>26.2</b></div>
+            <div class="stack-row"><span>Loader</span><b>Fabric</b></div>
+            <div class="stack-row"><span>Fabric API</span><b>Automatic</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-logs" class="view scroll-view">
+        <div class="section-head">
+          <div>
+            <div class="overline">DIAGNOSTICS</div>
+            <h2>Logs</h2>
+            <p>Launcher, installer and game output.</p>
+          </div>
+          <button id="clearLogsBtn" class="secondary-btn">Clear</button>
+        </div>
+        <pre id="logOutput" class="logs">No logs yet.</pre>
+      </section>
+    </main>
+
+    <aside class="right-rail">
+      <section class="right-panel friends-panel">
+        <div class="right-panel-head"><span>FRIENDS / MESSAGES</span><span class="live-dot"></span></div>
+        <div class="friends-content">
+          <div class="friend-orb">S</div>
+          <b>Social panel</b>
+          <p>This area follows your sketch. Friends and direct messages can be hooked into a backend later.</p>
+          <div class="social-placeholder"><span></span><span></span><span></span></div>
+        </div>
+      </section>
+
+      <section class="right-panel news-panel">
+        <div class="right-panel-head"><span>NEWS</span><button id="newsHomeBtn" class="mini-link">HOME</button></div>
+        <div class="news-list">
+          <article><span class="news-tag">CLIENT</span><h3>SpectorClient 26.2</h3><p>Dedicated Fabric instance, Microsoft login and automatic client setup.</p></article>
+          <article><span class="news-tag">NEW</span><h3>Modrinth browser</h3><p>Search and install Fabric 26.2 mods directly into the SpectorClient mods folder.</p></article>
+          <article><span class="news-tag">FILES</span><h3>Separate instance</h3><p>Your normal <code>.minecraft</code> folder stays untouched.</p></article>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="authModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-crystal"></div>
+      <div class="overline">MICROSOFT SIGN-IN</div>
+      <h2>Connect your account</h2>
+      <p id="authMessage">Starting Microsoft's secure sign-in…</p>
+      <div id="authCode" class="device-code hidden"></div>
+      <button id="openAuthLinkBtn" class="accent-btn wide hidden">Open Microsoft sign-in</button>
+      <button id="closeAuthModalBtn" class="secondary-btn wide">Hide</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="../node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

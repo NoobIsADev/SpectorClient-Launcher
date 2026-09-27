@@ -1,0 +1,62 @@
+{
+  "name": "spectorclient-launcher",
+  "version": "1.6.0",
+  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with GitHub Releases auto-updates",
+  "main": "src/main.js",
+  "author": "SpectorClient",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable",
+    "fetch-brand": "node scripts/fetch-brand.js",
+    "prestart": "npm run fetch-brand",
+    "predist": "npm run fetch-brand",
+    "predist:win": "npm run fetch-brand",
+    "predist:portable": "npm run fetch-brand",
+    "release:win": "npm run fetch-brand && electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "minecraft-launcher-core": "3.18.2",
+    "prismarine-auth": "3.1.1",
+    "skinview3d": "3.4.2",
+    "electron-updater": "6.8.9"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "pngjs": "7.0.0"
+  },
+  "build": {
+    "appId": "client.spector.launcher",
+    "productName": "SpectorClient",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "SpectorClient-${version}-${arch}.${ext}",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SpectorClient"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "NoobIsADev",
+      "repo": "SpectorClient-Launcher",
+      "releaseType": "release"
+    }
+  }
+}

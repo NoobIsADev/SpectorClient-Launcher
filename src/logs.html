@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';" />
+  <title>SpectorClient Logs</title>
+  <link rel="stylesheet" href="logs.css" />
+</head>
+<body>
+  <div class="log-shell">
+    <header class="log-head">
+      <div class="brand">
+        <img src="assets/spector-logo.png" alt="" />
+        <div><small>SPECTORCLIENT</small><b>Logs</b></div>
+      </div>
+      <div class="actions">
+        <label><input id="autoScroll" type="checkbox" checked /> Auto-scroll</label>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </header>
+    <main>
+      <pre id="logOutput">No logs yet.</pre>
+    </main>
+  </div>
+  <script src="logs.js"></script>
+</body>
+</html>

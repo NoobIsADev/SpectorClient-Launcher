@@ -1,0 +1,1527 @@
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const crypto = require('crypto');
+const https = require('https');
+const { execFile } = require('child_process');
+const { Authflow } = require('prismarine-auth');
+const { Client } = require('minecraft-launcher-core');
+const { autoUpdater } = require('electron-updater');
+
+const PRODUCT_NAME = 'SpectorClient';
+const GAME_VERSION = '26.2';
+const SPECTOR_MOD_URL = 'https://spectorclient.com/mod/download';
+const SPECTOR_MOD_FILENAME = 'spectorclient.jar';
+const LEGACY_SPECTOR_MOD_FILENAMES = ['spectorclient-1.0.0.jar'];
+const BRAND_IMAGE_URL = 'https://i.imgur.com/nP9aVFe.png';
+const BRAND_IMAGE_PATH = path.join(__dirname, 'assets', 'spector-logo.png');
+const FABRIC_API_PROJECT = 'fabric-api';
+const MODRINTH_API = 'https://api.modrinth.com/v2';
+const USER_AGENT = `SpectorClient/${app.getVersion()} (Electron Minecraft launcher)`;
+const MODRINTH_PAGE_SIZE = 24;
+const JAVA_MAJOR = 25;
+
+// Keep this client completely separate from the normal .minecraft folder.
+const APPDATA_ROOT = process.env.APPDATA
+  ? path.join(process.env.APPDATA, 'spectorclient')
+  : path.join(app.getPath('appData'), 'spectorclient');
+const LAUNCHER_DATA = path.join(APPDATA_ROOT, 'launcher-data');
+app.setPath('userData', LAUNCHER_DATA);
+const JAVA_RUNTIME_DIR = path.join(APPDATA_ROOT, 'runtime', 'java-25');
+const JAVA_RUNTIME_DOWNLOAD_DIR = path.join(LAUNCHER_DATA, 'downloads');
+
+let mainWindow;
+let logWindow;
+const logBuffer = [];
+const MAX_LOG_LINES = 2500;
+let activeGameProcess = null;
+let launcherEventsBound = false;
+let preferredUiScale = 1;
+let effectiveUiScale = 1;
+let scaleResizeTimer = null;
+let fabricApiRefreshPromise = null;
+let javaInstallPromise = null;
+let updaterInitialized = false;
+let updaterInterval = null;
+let lastUpdaterProgressBucket = -1;
+
+// The UI was designed around this content area. The preferred user scale is
+// automatically capped to a fit scale whenever the window is too small.
+const DESIGN_WIDTH = 1240;
+const DESIGN_HEIGHT = 760;
+const launcher = new Client();
+
+const p = (...parts) => path.join(APPDATA_ROOT, ...parts);
+const launcherDataPath = (...parts) => path.join(LAUNCHER_DATA, ...parts);
+
+function defaultSettings() {
+  return {
+    selectedAccountId: null,
+    minRamGb: 4,
+    maxRamGb: 6,
+    javaPath: '',
+    width: 1280,
+    height: 720,
+    fullscreen: false,
+    serverAddress: '',
+    closeLauncherOnStart: false,
+    logsPopout: true,
+    uiScale: 1,
+    animationsEnabled: true,
+    soundsEnabled: true,
+    soundVolume: 42,
+    theme: 'classic',
+    accounts: []
+  };
+}
+
+async function ensureDirs() {
+  await Promise.all([
+    fsp.mkdir(APPDATA_ROOT, { recursive: true }),
+    fsp.mkdir(LAUNCHER_DATA, { recursive: true }),
+    fsp.mkdir(launcherDataPath('accounts'), { recursive: true }),
+    fsp.mkdir(p('mods'), { recursive: true }),
+    fsp.mkdir(p('versions'), { recursive: true }),
+    fsp.mkdir(path.join(APPDATA_ROOT, 'runtime'), { recursive: true }),
+    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true })
+  ]);
+}
+
+
+function temurinArch() {
+  if (process.arch === 'x64') return 'x64';
+  if (process.arch === 'arm64') return 'aarch64';
+  throw new Error(`Automatic Java 25 installation does not support Windows ${process.arch}.`);
+}
+
+function managedJavaPath() {
+  if (process.platform === 'win32') return path.join(JAVA_RUNTIME_DIR, 'bin', 'javaw.exe');
+  return path.join(JAVA_RUNTIME_DIR, 'bin', 'java');
+}
+
+function managedJavaConsolePath() {
+  if (process.platform === 'win32') return path.join(JAVA_RUNTIME_DIR, 'bin', 'java.exe');
+  return managedJavaPath();
+}
+
+async function pathExists(filePath) {
+  try {
+    await fsp.access(filePath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function execFilePromise(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true, ...options }, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function isJava25(javaExecutable) {
+  if (!(await pathExists(javaExecutable))) return false;
+  try {
+    const { stdout, stderr } = await execFilePromise(javaExecutable, ['-version'], { timeout: 15000 });
+    const output = `${stdout || ''}\n${stderr || ''}`;
+    return /(?:openjdk|java) version ["']25(?:[.\-+_][^"']*)?["']/i.test(output) || /version ["']25(?:\.|["'])/i.test(output);
+  } catch {
+    return false;
+  }
+}
+
+function downloadJavaArchive(url, destination, { redirects = 8, onProgress = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const requestUrl = (currentUrl, remaining) => {
+      const req = https.get(currentUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept': 'application/octet-stream,*/*;q=0.8'
+        }
+      }, (res) => {
+        const status = res.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && remaining > 0) {
+          const next = new URL(res.headers.location, currentUrl).toString();
+          res.resume();
+          requestUrl(next, remaining - 1);
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`Java download failed with HTTP ${status}.`));
+          return;
+        }
+
+        const total = Number(res.headers['content-length']) || 0;
+        let received = 0;
+        const output = fs.createWriteStream(destination);
+        output.on('error', reject);
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (onProgress) onProgress(received, total);
+        });
+        res.on('error', reject);
+        output.on('finish', () => output.close(() => resolve(destination)));
+        res.pipe(output);
+      });
+      req.on('error', reject);
+      req.setTimeout(120000, () => req.destroy(new Error('Java download timed out.')));
+    };
+    requestUrl(url, redirects);
+  });
+}
+
+async function findJavaHome(root, depth = 4) {
+  const consoleName = process.platform === 'win32' ? 'java.exe' : 'java';
+  const candidate = path.join(root, 'bin', consoleName);
+  if (await pathExists(candidate)) return root;
+  if (depth <= 0) return null;
+
+  let entries = [];
+  try {
+    entries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = await findJavaHome(path.join(root, entry.name), depth - 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+async function installManagedJava25() {
+  if (process.platform !== 'win32') {
+    throw new Error('Automatic Java 25 installation is currently supported on Windows only. Select Java 25 manually in Settings on this platform.');
+  }
+
+  await ensureDirs();
+  const arch = temurinArch();
+  const downloadPath = path.join(JAVA_RUNTIME_DOWNLOAD_DIR, `temurin-${JAVA_MAJOR}-${arch}-${process.pid}.zip`);
+  const stagingDir = path.join(APPDATA_ROOT, 'runtime', `.java-25-install-${process.pid}-${Date.now()}`);
+  const jreUrl = `https://api.adoptium.net/v3/binary/latest/${JAVA_MAJOR}/ga/windows/${arch}/jre/hotspot/normal/eclipse`;
+  const jdkUrl = `https://api.adoptium.net/v3/binary/latest/${JAVA_MAJOR}/ga/windows/${arch}/jdk/hotspot/normal/eclipse`;
+
+  log(`Installing managed Java ${JAVA_MAJOR} (${arch}) from Eclipse Temurin…`);
+  send('install-state', { step: 'Java 25', message: 'Downloading Java 25…' });
+
+  await fsp.rm(downloadPath, { force: true }).catch(() => {});
+  await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  await fsp.mkdir(stagingDir, { recursive: true });
+
+  let lastPercent = -1;
+  const onProgress = (received, total) => {
+    if (!total) return;
+    const percent = Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
+    if (percent === lastPercent || percent % 5 !== 0) return;
+    lastPercent = percent;
+    send('install-state', { step: 'Java 25', message: `Downloading Java 25… ${percent}%`, percent });
+  };
+
+  try {
+    try {
+      await downloadJavaArchive(jreUrl, downloadPath, { onProgress });
+    } catch (error) {
+      log(`Temurin JRE download failed (${error.message}); trying the Java 25 JDK package.`, 'debug');
+      await fsp.rm(downloadPath, { force: true }).catch(() => {});
+      await downloadJavaArchive(jdkUrl, downloadPath, { onProgress });
+    }
+
+    const fd = await fsp.open(downloadPath, 'r');
+    const header = Buffer.alloc(4);
+    await fd.read(header, 0, 4, 0);
+    await fd.close();
+    if (header[0] !== 0x50 || header[1] !== 0x4b) {
+      throw new Error('Downloaded Java package is not a valid ZIP archive.');
+    }
+
+    send('install-state', { step: 'Java 25', message: 'Installing Java 25…' });
+    await execFilePromise('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-Command',
+      `Expand-Archive -LiteralPath ${JSON.stringify(downloadPath)} -DestinationPath ${JSON.stringify(stagingDir)} -Force`
+    ], { timeout: 180000, maxBuffer: 1024 * 1024 * 4 });
+
+    const extractedHome = await findJavaHome(stagingDir);
+    if (!extractedHome) throw new Error('Java 25 extracted, but bin\\java.exe could not be found.');
+
+    const extractedJava = path.join(extractedHome, 'bin', 'java.exe');
+    if (!(await isJava25(extractedJava))) throw new Error('The downloaded runtime did not report Java 25.');
+
+    await fsp.rm(JAVA_RUNTIME_DIR, { recursive: true, force: true }).catch(() => {});
+    if (path.resolve(extractedHome) === path.resolve(stagingDir)) {
+      await fsp.rename(stagingDir, JAVA_RUNTIME_DIR);
+    } else {
+      await fsp.rename(extractedHome, JAVA_RUNTIME_DIR);
+      await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    const launchJava = managedJavaPath();
+    const fallbackJava = managedJavaConsolePath();
+    const resolved = await pathExists(launchJava) ? launchJava : fallbackJava;
+    if (!(await pathExists(resolved))) throw new Error('Managed Java 25 installation completed without a Java executable.');
+
+    log(`Managed Java 25 is ready: ${resolved}`);
+    send('install-state', { step: 'Java 25', message: 'Java 25 ready.', percent: 100 });
+    return resolved;
+  } finally {
+    await fsp.rm(downloadPath, { force: true }).catch(() => {});
+    if (await pathExists(stagingDir)) await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function ensureManagedJava25({ force = false } = {}) {
+  if (!force && await isJava25(managedJavaConsolePath())) {
+    const launchJava = managedJavaPath();
+    return await pathExists(launchJava) ? launchJava : managedJavaConsolePath();
+  }
+
+  if (!javaInstallPromise) {
+    javaInstallPromise = installManagedJava25().finally(() => {
+      javaInstallPromise = null;
+    });
+  }
+  return javaInstallPromise;
+}
+
+async function loadSettings() {
+  await ensureDirs();
+  try {
+    const parsed = JSON.parse(await fsp.readFile(launcherDataPath('settings.json'), 'utf8'));
+    return {
+      ...defaultSettings(),
+      ...parsed,
+      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : []
+    };
+  } catch {
+    return defaultSettings();
+  }
+}
+
+async function saveSettings(settings) {
+  const safe = { ...defaultSettings(), ...settings };
+  // The game directory and game version are intentionally fixed in this build.
+  delete safe.gameDirectory;
+  delete safe.clientId;
+  delete safe.selectedVersion;
+  delete safe.versionType;
+  delete safe.backgroundTransparency; // v1.4.2+: launcher is always fully opaque.
+  await fsp.writeFile(launcherDataPath('settings.json'), JSON.stringify(safe, null, 2));
+  return safe;
+}
+
+function clampUiScale(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1.8, Math.max(0.6, Math.round(n * 10) / 10));
+}
+
+function calculateFitScale() {
+  if (!mainWindow || mainWindow.isDestroyed()) return preferredUiScale;
+
+  const bounds = mainWindow.getContentBounds();
+  const widthFit = bounds.width / DESIGN_WIDTH;
+  const heightFit = bounds.height / DESIGN_HEIGHT;
+
+  // Keep a tiny safety margin so borders/taskbar/work-area rounding never clips
+  // the bottom row by a pixel or two. Do not force the UI larger than requested.
+  return Math.max(0.5, Math.min(widthFit, heightFit) * 0.995);
+}
+
+function applyUiScale(value = preferredUiScale, { announce = false } = {}) {
+  preferredUiScale = clampUiScale(value);
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const fitScale = calculateFitScale();
+    effectiveUiScale = Math.max(0.5, Math.min(preferredUiScale, fitScale));
+    mainWindow.webContents.setZoomFactor(effectiveUiScale);
+
+    if (announce) {
+      send('ui-scale', {
+        scale: effectiveUiScale,
+        percent: Math.round(effectiveUiScale * 100),
+        preferredScale: preferredUiScale,
+        preferredPercent: Math.round(preferredUiScale * 100),
+        autoFitted: effectiveUiScale + 0.001 < preferredUiScale
+      });
+    }
+  }
+
+  return effectiveUiScale;
+}
+
+function scheduleFitScale({ announce = false } = {}) {
+  if (scaleResizeTimer) clearTimeout(scaleResizeTimer);
+  scaleResizeTimer = setTimeout(() => {
+    scaleResizeTimer = null;
+    applyUiScale(preferredUiScale, { announce });
+  }, 45);
+}
+
+async function persistUiScale(value, announce = true) {
+  const settings = await loadSettings();
+  settings.uiScale = clampUiScale(value);
+  await saveSettings(settings);
+  preferredUiScale = settings.uiScale;
+  return applyUiScale(preferredUiScale, { announce });
+}
+
+async function refreshWindowIcon() {
+  try {
+    await fsp.mkdir(path.dirname(BRAND_IMAGE_PATH), { recursive: true });
+    let valid = false;
+    try { valid = (await fsp.stat(BRAND_IMAGE_PATH)).size > 128; } catch {}
+    if (!valid) await downloadFile(BRAND_IMAGE_URL, BRAND_IMAGE_PATH, 'SpectorClient logo');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const icon = nativeImage.createFromPath(BRAND_IMAGE_PATH);
+      if (!icon.isEmpty()) mainWindow.setIcon(icon);
+    }
+  } catch (error) {
+    log(`Could not cache SpectorClient logo: ${error.message}`, 'debug');
+  }
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1240,
+    height: 760,
+    minWidth: 1040,
+    minHeight: 650,
+    backgroundColor: '#02070b',
+    transparent: false,
+    title: PRODUCT_NAME,
+    frame: false,
+    show: false,
+    icon: fs.existsSync(BRAND_IMAGE_PATH) ? BRAND_IMAGE_PATH : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.once('ready-to-show', async () => {
+    const settings = await loadSettings();
+    applyUiScale(settings.uiScale);
+    mainWindow.show();
+    refreshWindowIcon();
+  });
+
+  const reapplyScale = () => setTimeout(() => applyUiScale(preferredUiScale, { announce: true }), 30);
+  mainWindow.on('maximize', () => { send('window-maximized', true); reapplyScale(); });
+  mainWindow.on('unmaximize', () => { send('window-maximized', false); reapplyScale(); });
+  mainWindow.on('enter-full-screen', reapplyScale);
+  mainWindow.on('leave-full-screen', reapplyScale);
+  mainWindow.on('resize', () => scheduleFitScale());
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+
+    if (input.key === 'F11' || input.code === 'F11') {
+      event.preventDefault();
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
+      setTimeout(() => applyUiScale(preferredUiScale, { announce: true }), 30);
+      return;
+    }
+
+    const ctrl = input.control || input.meta;
+    if (!ctrl) return;
+
+    const plus = input.key === '+' || input.key === '=' || input.code === 'NumpadAdd';
+    const minus = input.key === '-' || input.key === '_' || input.code === 'NumpadSubtract';
+    const reset = input.key === '0' || input.code === 'Numpad0';
+    if (!plus && !minus && !reset) return;
+
+    event.preventDefault();
+    if (plus) persistUiScale(preferredUiScale + 0.1).catch(() => {});
+    else if (minus) persistUiScale(preferredUiScale - 0.1).catch(() => {});
+    else persistUiScale(1).catch(() => {});
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+}
+
+function normalizeLauncherTheme(value) {
+  return ['classic', 'classic-pink', 'crimson', 'prince'].includes(value) ? value : 'classic';
+}
+
+function logWindowBackground(theme) {
+  const normalized = normalizeLauncherTheme(theme);
+  if (normalized === 'classic-pink') return '#12070d';
+  if (normalized === 'crimson') return '#100307';
+  if (normalized === 'prince') return '#100c03';
+  return '#031018';
+}
+
+function pushThemeToLogWindow(theme) {
+  if (!logWindow || logWindow.isDestroyed()) return;
+  const normalized = normalizeLauncherTheme(theme);
+  logWindow.setBackgroundColor(logWindowBackground(normalized));
+  logWindow.webContents.send('theme-changed', normalized);
+}
+
+function createLogWindow(theme = 'classic') {
+  const normalizedTheme = normalizeLauncherTheme(theme);
+  if (logWindow && !logWindow.isDestroyed()) {
+    pushThemeToLogWindow(normalizedTheme);
+    logWindow.show();
+    logWindow.focus();
+    return logWindow;
+  }
+
+  logWindow = new BrowserWindow({
+    width: 920,
+    height: 560,
+    minWidth: 640,
+    minHeight: 360,
+    backgroundColor: logWindowBackground(normalizedTheme),
+    title: 'SpectorClient Logs',
+    show: false,
+    autoHideMenuBar: true,
+    icon: fs.existsSync(BRAND_IMAGE_PATH) ? BRAND_IMAGE_PATH : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  logWindow.loadFile(path.join(__dirname, 'logs.html'));
+  logWindow.webContents.once('did-finish-load', () => pushThemeToLogWindow(normalizedTheme));
+  logWindow.once('ready-to-show', () => logWindow?.show());
+  logWindow.on('closed', () => { logWindow = null; });
+  logWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  return logWindow;
+}
+
+function makeIpcSafe(value, seen = new WeakSet()) {
+  if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) return value;
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'function' || typeof value === 'symbol' || typeof value === 'undefined') return undefined;
+  if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack || '' };
+  if (Buffer.isBuffer(value)) return { type: 'Buffer', data: value.toString('base64') };
+  if (Array.isArray(value)) return value.map((item) => makeIpcSafe(item, seen));
+  if (typeof value === 'object') {
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      const safe = makeIpcSafe(item, seen);
+      if (safe !== undefined) out[key] = safe;
+    }
+    seen.delete(value);
+    return out;
+  }
+  return String(value);
+}
+
+function send(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send(channel, makeIpcSafe(payload));
+  } catch (error) {
+    console.error(`IPC send failed for ${channel}:`, error);
+  }
+}
+
+function sendLogPayload(payload) {
+  send('game-log', payload);
+  if (logWindow && !logWindow.isDestroyed()) logWindow.webContents.send('game-log', payload);
+}
+
+function log(line, type = 'launcher') {
+  const payload = { type, line: String(line), at: Date.now() };
+  logBuffer.push(payload);
+  if (logBuffer.length > MAX_LOG_LINES) logBuffer.splice(0, logBuffer.length - MAX_LOG_LINES);
+  sendLogPayload(payload);
+}
+
+
+function emitUpdateState(state, extra = {}) {
+  const payload = { state, ...makeIpcSafe(extra), at: Date.now() };
+  send('update-state', payload);
+  return payload;
+}
+
+function setupAutoUpdater() {
+  if (updaterInitialized || !app.isPackaged) {
+    if (!app.isPackaged) log('[Updater] Development build detected; automatic updates are disabled.', 'updater');
+    return;
+  }
+
+  updaterInitialized = true;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    log('[Updater] Checking for launcher updates…', 'updater');
+    emitUpdateState('checking', { text: 'Checking for launcher updates…' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    lastUpdaterProgressBucket = -1;
+    log(`[Updater] SpectorClient ${info.version} is available. Downloading in the background…`, 'updater');
+    emitUpdateState('available', {
+      version: info.version,
+      text: `SpectorClient ${info.version} is available. Downloading…`
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    const version = info?.version || app.getVersion();
+    log(`[Updater] SpectorClient ${version} is up to date.`, 'updater');
+    emitUpdateState('current', { version, text: 'SpectorClient is up to date.' });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
+    const bucket = Math.floor(percent / 10);
+    if (bucket !== lastUpdaterProgressBucket || percent === 100) {
+      lastUpdaterProgressBucket = bucket;
+      log(`[Updater] Downloading update: ${percent}%`, 'updater');
+    }
+    emitUpdateState('downloading', {
+      percent,
+      text: `Downloading launcher update… ${percent}%`
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    const version = info?.version || 'new version';
+    log(`[Updater] SpectorClient ${version} downloaded. It will install when the launcher closes.`, 'updater');
+    emitUpdateState('downloaded', {
+      version,
+      text: `SpectorClient ${version} is ready and will install when the launcher closes.`
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    const message = error?.message || String(error);
+    log(`[Updater] Update check failed: ${message}`, 'updater');
+    emitUpdateState('error', { text: `Updater error: ${message}` });
+  });
+
+  const check = () => autoUpdater.checkForUpdates().catch((error) => {
+    const message = error?.message || String(error);
+    log(`[Updater] Could not check for updates: ${message}`, 'updater');
+    emitUpdateState('error', { text: `Could not check for updates: ${message}` });
+  });
+
+  // Delay the first check slightly so Java/Fabric startup housekeeping is not competing
+  // with the updater for network/disk resources during the first renderer frame.
+  setTimeout(check, 5000).unref?.();
+  updaterInterval = setInterval(check, 4 * 60 * 60 * 1000);
+  updaterInterval.unref?.();
+}
+
+function request(url, { binary = false, redirects = 8 } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: binary ? '*/*' : 'application/json'
+      }
+    }, (res) => {
+      const status = res.statusCode || 0;
+      if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirects > 0) {
+        res.resume();
+        const next = new URL(res.headers.location, url).toString();
+        request(next, { binary, redirects: redirects - 1 }).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => reject(new Error(`HTTP ${status} from ${new URL(url).hostname}: ${body.slice(0, 180)}`)));
+        return;
+      }
+      if (binary) {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      } else {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(body)); }
+          catch (e) { reject(new Error(`Invalid JSON from ${new URL(url).hostname}: ${e.message}`)); }
+        });
+      }
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error(`Request timed out: ${url}`)));
+  });
+}
+
+async function downloadFile(url, destination, label, { silent = false } = {}) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:') throw new Error(`${label} must use HTTPS.`);
+
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  const temp = `${destination}.download`;
+  await fsp.rm(temp, { force: true }).catch(() => {});
+
+  return new Promise((resolve, reject) => {
+    const doDownload = (currentUrl, redirects = 8) => {
+      const req = https.get(currentUrl, {
+        headers: { 'User-Agent': USER_AGENT, Accept: '*/*' }
+      }, (res) => {
+        const status = res.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirects > 0) {
+          res.resume();
+          doDownload(new URL(res.headers.location, currentUrl).toString(), redirects - 1);
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          res.resume();
+          reject(new Error(`${label} download failed with HTTP ${status}.`));
+          return;
+        }
+
+        const total = Number(res.headers['content-length'] || 0);
+        let received = 0;
+        const out = fs.createWriteStream(temp);
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (total > 0) {
+            const percent = Math.min(100, Math.round((received / total) * 100));
+            if (!silent) send('install-state', { step: label, text: `Downloading ${label}… ${percent}%`, percent });
+          }
+        });
+        res.pipe(out);
+        out.on('finish', async () => {
+          out.close();
+          try {
+            const stat = await fsp.stat(temp);
+            if (!stat.size) throw new Error(`${label} downloaded as an empty file.`);
+            await fsp.rm(destination, { force: true }).catch(() => {});
+            await fsp.rename(temp, destination);
+            log(`${label} ready: ${destination}`);
+            resolve(destination);
+          } catch (e) { reject(e); }
+        });
+        out.on('error', reject);
+      });
+      req.on('error', reject);
+      req.setTimeout(60000, () => req.destroy(new Error(`${label} download timed out.`)));
+    };
+    doDownload(url);
+  }).catch(async (error) => {
+    await fsp.rm(temp, { force: true }).catch(() => {});
+    throw error;
+  });
+}
+
+async function removeMatchingMods(prefix, keepPath) {
+  const modsDir = p('mods');
+  const names = await fsp.readdir(modsDir).catch(() => []);
+  for (const name of names) {
+    if (name.toLowerCase().startsWith(prefix.toLowerCase()) && name.toLowerCase().endsWith('.jar')) {
+      const full = path.join(modsDir, name);
+      if (path.resolve(full) !== path.resolve(keepPath)) await fsp.rm(full, { force: true }).catch(() => {});
+    }
+  }
+}
+
+async function ensureFabricProfile() {
+  send('install-state', { step: 'Fabric Loader', text: 'Checking Fabric Loader…' });
+  const loaders = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(GAME_VERSION)}`);
+  if (!Array.isArray(loaders) || !loaders.length) throw new Error(`Fabric Loader does not currently list Minecraft ${GAME_VERSION}.`);
+
+  const selected = loaders.find((x) => x?.loader?.stable) || loaders[0];
+  const loaderVersion = selected?.loader?.version;
+  if (!loaderVersion) throw new Error('Could not determine a Fabric Loader version.');
+
+  const profile = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(GAME_VERSION)}/${encodeURIComponent(loaderVersion)}/profile/json`);
+  const versionId = profile?.id || `fabric-loader-${loaderVersion}-${GAME_VERSION}`;
+  const versionDir = p('versions', versionId);
+  const versionJson = path.join(versionDir, `${versionId}.json`);
+  await fsp.mkdir(versionDir, { recursive: true });
+  await fsp.writeFile(versionJson, JSON.stringify(profile, null, 2));
+  log(`Fabric Loader ${loaderVersion} profile prepared (${versionId}).`);
+  return { loaderVersion, versionId };
+}
+
+async function ensureFabricApi({ silent = false } = {}) {
+  // Deduplicate startup/play/mod-manager checks so two callers cannot race while
+  // replacing the same Fabric API JAR.
+  if (fabricApiRefreshPromise) return fabricApiRefreshPromise;
+
+  fabricApiRefreshPromise = (async () => {
+    if (!silent) send('install-state', { step: 'Fabric API', text: 'Checking Fabric API…' });
+    const params = new URLSearchParams({
+      loaders: JSON.stringify(['fabric']),
+      game_versions: JSON.stringify([GAME_VERSION]),
+      include_changelog: 'false'
+    });
+    const versions = await request(`${MODRINTH_API}/project/${FABRIC_API_PROJECT}/version?${params.toString()}`);
+    if (!Array.isArray(versions) || !versions.length) throw new Error(`No Fabric API build was found for Minecraft ${GAME_VERSION}.`);
+
+    // "Latest" means the newest compatible Fabric API build Modrinth currently
+    // returns for Fabric + Minecraft 26.2, regardless of what was installed before.
+    const sorted = [...versions].sort((a, b) => new Date(b.date_published || 0) - new Date(a.date_published || 0));
+    const version = sorted[0];
+    const file = version.files?.find((f) => f.primary && f.filename?.endsWith('.jar')) || version.files?.find((f) => f.filename?.endsWith('.jar'));
+    if (!file?.url) throw new Error('Fabric API metadata did not contain a downloadable JAR.');
+
+    const filename = path.basename(file.filename || `fabric-api-${version.version_number}.jar`);
+    const destination = p('mods', filename);
+    const registry = await loadModRegistry();
+    const previous = registry[FABRIC_API_PROJECT] || null;
+
+    // Remove old Fabric API JAR names, but keep the destination if the newest
+    // build uses the same filename so it can be verified before redownloading.
+    await removeMatchingMods('fabric-api-', destination);
+
+    let alreadyLatest = false;
+    try {
+      const stat = await fsp.stat(destination);
+      alreadyLatest = previous?.versionId === version.id
+        && stat.size > 0
+        && (!file.size || stat.size === Number(file.size));
+    } catch {}
+
+    if (!alreadyLatest) {
+      await downloadFile(file.url, destination, `Fabric API ${version.version_number}`, { silent });
+    } else {
+      log(`Fabric API already on latest compatible build: ${version.version_number}`);
+    }
+
+    registry[FABRIC_API_PROJECT] = {
+      projectId: FABRIC_API_PROJECT,
+      projectSlug: FABRIC_API_PROJECT,
+      title: 'Fabric API',
+      iconUrl: previous?.iconUrl || '',
+      filename,
+      versionId: version.id,
+      versionNumber: version.version_number || '',
+      dependency: false,
+      installedAt: previous?.installedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    await saveModRegistry(registry);
+
+    return { version: version.version_number, versionId: version.id, filename };
+  })();
+
+  try {
+    return await fabricApiRefreshPromise;
+  } finally {
+    fabricApiRefreshPromise = null;
+  }
+}
+
+async function ensureSpectorMod() {
+  const destination = p('mods', SPECTOR_MOD_FILENAME);
+  send('install-state', { step: 'SpectorClient', text: 'Refreshing SpectorClient mod…' });
+
+  // Intentionally remove ONLY SpectorClient's own fixed filenames. Never wildcard-delete user mods.
+  const spectorFiles = [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES];
+  for (const filename of spectorFiles) {
+    await fsp.rm(p('mods', filename), { force: true }).catch(() => {});
+  }
+
+  await downloadFile(SPECTOR_MOD_URL, destination, 'SpectorClient mod');
+  log(`SpectorClient mod refreshed from ${SPECTOR_MOD_URL}`);
+  return destination;
+}
+
+async function prepareClient() {
+  await ensureDirs();
+  send('install-state', { step: 'Preparing', text: `Preparing SpectorClient for Minecraft ${GAME_VERSION}…`, percent: 0 });
+  const fabric = await ensureFabricProfile();
+  const api = await ensureFabricApi();
+  await ensureSpectorMod();
+  send('install-state', { step: 'Ready', text: 'Client ready.', percent: 100 });
+  return { ...fabric, fabricApiVersion: api.version };
+}
+
+// ---------------------------
+// Modrinth mod manager
+// ---------------------------
+
+async function loadModRegistry() {
+  await ensureDirs();
+  try {
+    const data = JSON.parse(await fsp.readFile(launcherDataPath('mods-registry.json'), 'utf8'));
+    return data && typeof data === 'object' ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveModRegistry(registry) {
+  await fsp.writeFile(launcherDataPath('mods-registry.json'), JSON.stringify(registry, null, 2));
+}
+
+function isCoreModFilename(filename) {
+  const lower = String(filename).toLowerCase();
+  return lower.startsWith('fabric-api-') || lower === SPECTOR_MOD_FILENAME.toLowerCase() || LEGACY_SPECTOR_MOD_FILENAMES.map((name) => name.toLowerCase()).includes(lower);
+}
+
+async function listInstalledMods() {
+  await ensureDirs();
+  const registry = await loadModRegistry();
+  const entries = await fsp.readdir(p('mods'), { withFileTypes: true }).catch(() => []);
+  const files = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.jar')) continue;
+    const stat = await fsp.stat(p('mods', entry.name)).catch(() => null);
+    if (!stat) continue;
+    const registered = Object.values(registry).find((item) => item?.filename === entry.name) || null;
+    files.push({
+      filename: entry.name,
+      size: stat.size,
+      core: isCoreModFilename(entry.name),
+      projectId: registered?.projectId || '',
+      projectSlug: registered?.projectSlug || '',
+      title: registered?.title || entry.name.replace(/\.jar$/i, ''),
+      versionNumber: registered?.versionNumber || '',
+      versionId: registered?.versionId || '',
+      iconUrl: registered?.iconUrl || '',
+      dependency: Boolean(registered?.dependency)
+    });
+  }
+
+  files.sort((a, b) => Number(b.core) - Number(a.core) || a.title.localeCompare(b.title));
+  return files;
+}
+
+async function searchModrinthMods(query, page = 1) {
+  const q = String(query || '').trim().slice(0, 100);
+  const safePage = Math.max(1, Math.min(10000, Number.parseInt(page, 10) || 1));
+  const offset = (safePage - 1) * MODRINTH_PAGE_SIZE;
+  const facets = [
+    ['project_type:mod'],
+    ['categories:fabric'],
+    [`versions:${GAME_VERSION}`],
+    [
+      'environment:client_and_server',
+      'environment:client_only',
+      'environment:client_only_server_optional',
+      'environment:client_or_server',
+      'environment:client_or_server_prefers_both',
+      'environment:unknown'
+    ]
+  ];
+  const params = new URLSearchParams({
+    query: q,
+    facets: JSON.stringify(facets),
+    limit: String(MODRINTH_PAGE_SIZE),
+    offset: String(offset),
+    index: q ? 'relevance' : 'downloads'
+  });
+  const data = await request(`${MODRINTH_API}/search?${params.toString()}`);
+  const hits = Array.isArray(data?.hits) ? data.hits : [];
+  const total = Math.max(0, Number(data?.total_hits ?? (offset + hits.length)) || 0);
+  const totalPages = Math.max(1, Math.ceil(total / MODRINTH_PAGE_SIZE));
+  return {
+    items: hits.map((hit) => ({
+      projectId: hit.project_id,
+      slug: hit.slug || '',
+      title: hit.title || hit.slug || 'Untitled mod',
+      description: hit.description || '',
+      author: hit.author || '',
+      iconUrl: hit.icon_url || '',
+      downloads: Number(hit.downloads || 0),
+      categories: Array.isArray(hit.display_categories) ? hit.display_categories.slice(0, 5) : []
+    })),
+    total,
+    page: Math.min(safePage, totalPages),
+    pageSize: MODRINTH_PAGE_SIZE,
+    totalPages
+  };
+}
+
+async function getCompatibleProjectVersion(projectId, preferRelease = true) {
+  const params = new URLSearchParams({
+    loaders: JSON.stringify(['fabric']),
+    game_versions: JSON.stringify([GAME_VERSION]),
+    include_changelog: 'false'
+  });
+  const versions = await request(`${MODRINTH_API}/project/${encodeURIComponent(projectId)}/version?${params.toString()}`);
+  if (!Array.isArray(versions) || !versions.length) {
+    throw new Error(`No Fabric ${GAME_VERSION} version is available for this mod.`);
+  }
+  const sorted = [...versions].sort((a, b) => new Date(b.date_published || 0) - new Date(a.date_published || 0));
+  return preferRelease ? (sorted.find((v) => v.version_type === 'release') || sorted[0]) : sorted[0];
+}
+
+async function getModrinthProjectStatuses(projectIds) {
+  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : [])
+    .map((id) => String(id || '').trim())
+    .filter((id) => /^[A-Za-z0-9_-]{2,80}$/.test(id)))].slice(0, 60);
+  const registry = await loadModRegistry();
+  const statuses = {};
+
+  // Resolve in small batches so a page of Modrinth results does not create a
+  // large burst of simultaneous API requests.
+  const concurrency = 6;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      const installed = registry[id] || null;
+      try {
+        const latest = await getCompatibleProjectVersion(id, id !== FABRIC_API_PROJECT);
+        statuses[id] = {
+          projectId: id,
+          installed: Boolean(installed),
+          installedVersionId: installed?.versionId || '',
+          installedVersionNumber: installed?.versionNumber || '',
+          latestVersionId: latest?.id || '',
+          latestVersionNumber: latest?.version_number || '',
+          updateAvailable: Boolean(installed?.versionId && latest?.id && installed.versionId !== latest.id)
+        };
+      } catch (error) {
+        statuses[id] = {
+          projectId: id,
+          installed: Boolean(installed),
+          installedVersionId: installed?.versionId || '',
+          installedVersionNumber: installed?.versionNumber || '',
+          latestVersionId: '',
+          latestVersionNumber: '',
+          updateAvailable: false,
+          error: error.message
+        };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, ids.length || 1) }, () => worker()));
+  return statuses;
+}
+
+function pickVersionJar(version) {
+  const files = Array.isArray(version?.files) ? version.files : [];
+  return files.find((f) => f.primary && String(f.filename).toLowerCase().endsWith('.jar') && !f.file_type)
+    || files.find((f) => String(f.filename).toLowerCase().endsWith('.jar') && !f.file_type)
+    || files.find((f) => String(f.filename).toLowerCase().endsWith('.jar'));
+}
+
+async function resolveRequiredDependencyVersion(dep) {
+  if (dep?.version_id) {
+    const exact = await request(`${MODRINTH_API}/version/${encodeURIComponent(dep.version_id)}`);
+    const exactLoaders = Array.isArray(exact?.loaders) ? exact.loaders : [];
+    const exactGameVersions = Array.isArray(exact?.game_versions) ? exact.game_versions : [];
+    const exactCompatible = (!exactLoaders.length || exactLoaders.includes('fabric'))
+      && (!exactGameVersions.length || exactGameVersions.includes(GAME_VERSION));
+    if (exactCompatible) return exact;
+    // Some projects pin an old dependency version. If the dependency project ID is
+    // also available, prefer a current Fabric + 26.2-compatible build instead of
+    // leaving the dependency missing.
+    if (dep.project_id) return getCompatibleProjectVersion(dep.project_id);
+    throw new Error(`Pinned dependency version is not compatible with Fabric ${GAME_VERSION}.`);
+  }
+  if (dep?.project_id) return getCompatibleProjectVersion(dep.project_id);
+  if (dep?.file_name) {
+    throw new Error(`Required dependency ${dep.file_name} has no Modrinth project/version ID and cannot be downloaded automatically.`);
+  }
+  throw new Error('A required dependency is missing its Modrinth project/version ID.');
+}
+
+async function installModrinthVersion(version, { dependency = false, visited = new Set() } = {}) {
+  if (!version?.id) throw new Error('Invalid Modrinth version metadata.');
+  if (visited.has(version.id)) return null;
+  visited.add(version.id);
+
+  const loaders = Array.isArray(version.loaders) ? version.loaders : [];
+  const gameVersions = Array.isArray(version.game_versions) ? version.game_versions : [];
+  if (loaders.length && !loaders.includes('fabric')) throw new Error(`A required dependency is not available for Fabric.`);
+  if (gameVersions.length && !gameVersions.includes(GAME_VERSION)) throw new Error(`A required dependency is not compatible with Minecraft ${GAME_VERSION}.`);
+
+  // Every install/update recursively installs Modrinth-declared REQUIRED dependencies first.
+  // Dependencies can have their own dependencies, so the same routine is used recursively.
+  const requiredDependencies = (version.dependencies || []).filter((d) => d.dependency_type === 'required');
+  for (const dep of requiredDependencies) {
+    try {
+      const depVersion = await resolveRequiredDependencyVersion(dep);
+      send('mod-install-state', {
+        state: 'dependency',
+        projectId: version.project_id,
+        dependencyProjectId: depVersion?.project_id || dep.project_id || '',
+        text: 'Installing required dependency…'
+      });
+      await installModrinthVersion(depVersion, { dependency: true, visited });
+    } catch (error) {
+      throw new Error(`Could not install a required dependency: ${error.message}`);
+    }
+  }
+
+  const project = await request(`${MODRINTH_API}/project/${encodeURIComponent(version.project_id)}`);
+  if (project?.slug === FABRIC_API_PROJECT) {
+    await ensureFabricApi();
+    return { title: project.title || 'Fabric API', core: true };
+  }
+
+  const file = pickVersionJar(version);
+  if (!file?.url || !file?.filename) throw new Error('This Modrinth version does not contain an installable JAR.');
+  const filename = path.basename(file.filename);
+  const destination = p('mods', filename);
+  const registry = await loadModRegistry();
+  const registryKey = String(version.project_id);
+  const previous = registry[registryKey];
+
+  if (previous?.filename && previous.filename !== filename && !isCoreModFilename(previous.filename)) {
+    await fsp.rm(p('mods', path.basename(previous.filename)), { force: true }).catch(() => {});
+  }
+
+  let alreadyInstalled = false;
+  try {
+    const stat = await fsp.stat(destination);
+    // A matching file size alone is not enough to prove an update is current.
+    // Only skip the download when the registry says this exact Modrinth version
+    // is already installed and the on-disk file also looks complete.
+    alreadyInstalled = previous?.versionId === version.id
+      && stat.size > 0
+      && (!file.size || stat.size === Number(file.size));
+  } catch {}
+
+  if (!alreadyInstalled) {
+    send('mod-install-state', { state: 'downloading', projectId: version.project_id, text: `Installing ${project?.title || filename}…` });
+    await downloadFile(file.url, destination, project?.title || filename);
+  }
+
+  registry[registryKey] = {
+    projectId: version.project_id,
+    projectSlug: project?.slug || '',
+    title: project?.title || filename.replace(/\.jar$/i, ''),
+    iconUrl: project?.icon_url || '',
+    filename,
+    versionId: version.id,
+    versionNumber: version.version_number || '',
+    dependency: Boolean(dependency),
+    installedAt: new Date().toISOString()
+  };
+  await saveModRegistry(registry);
+  log(`${alreadyInstalled ? 'Verified' : 'Installed'} Modrinth mod: ${registry[registryKey].title} ${registry[registryKey].versionNumber}`);
+  return registry[registryKey];
+}
+
+async function installModrinthProject(projectId) {
+  const id = String(projectId || '').trim();
+  if (!/^[A-Za-z0-9_-]{2,80}$/.test(id)) throw new Error('Invalid Modrinth project ID.');
+  // Keep the launcher's required Fabric API core dependency on the newest
+  // compatible build whenever the user installs or updates any mod.
+  await ensureFabricApi({ silent: true });
+  const registryBefore = await loadModRegistry();
+  const previous = registryBefore[id] || null;
+  send('mod-install-state', { state: 'resolving', projectId: id, text: `Finding a Fabric ${GAME_VERSION} build and required dependencies…` });
+  const version = await getCompatibleProjectVersion(id);
+  const installed = await installModrinthVersion(version, { dependency: false, visited: new Set() });
+  const action = previous ? (previous.versionId === version.id ? 'verified' : 'updated') : 'installed';
+  const verb = action === 'updated' ? 'updated' : action === 'verified' ? 'verified' : 'installed';
+  send('mod-install-state', { state: 'complete', projectId: id, text: `${installed?.title || 'Mod'} ${verb} with required dependencies.` });
+  return { installed, action, mods: await listInstalledMods() };
+}
+
+async function removeInstalledMod(filename) {
+  const safeName = path.basename(String(filename || ''));
+  if (!safeName.toLowerCase().endsWith('.jar') || safeName !== String(filename || '')) throw new Error('Invalid mod filename.');
+  if (isCoreModFilename(safeName)) throw new Error('Fabric API and SpectorClient are required core mods and cannot be removed here.');
+
+  await fsp.rm(p('mods', safeName), { force: true });
+  const registry = await loadModRegistry();
+  for (const [key, item] of Object.entries(registry)) {
+    if (item?.filename === safeName) delete registry[key];
+  }
+  await saveModRegistry(registry);
+  log(`Removed mod: ${safeName}`);
+  return listInstalledMods();
+}
+
+// ---------------------------
+// Microsoft authentication
+// ---------------------------
+
+function buildMicrosoftDirectVerificationUrl(code) {
+  const userCode = code.user_code || code.userCode || '';
+  const verificationUri = code.verification_uri || code.verificationUri || 'https://microsoft.com/link';
+  const providedComplete = code.verification_uri_complete || code.verificationUriComplete || code.direct_verification_uri || code.directVerificationUri || '';
+
+  // Prefer a complete URI supplied by the identity provider when available.
+  if (providedComplete) return providedComplete;
+  if (!userCode) return verificationUri;
+
+  // Microsoft's consumer/link page accepts an OTC value that pre-populates the
+  // device code. Keep the plain verification URI as a fallback in the UI.
+  try {
+    const url = new URL(verificationUri);
+    const host = url.hostname.toLowerCase();
+    if (host === 'microsoft.com' || host.endsWith('.microsoft.com') || host === 'microsoftonline.com' || host.endsWith('.microsoftonline.com')) {
+      url.searchParams.set('otc', userCode);
+      return url.toString();
+    }
+  } catch (_) {
+    // Fall through to the known Microsoft link endpoint.
+  }
+
+  return `https://www.microsoft.com/link?otc=${encodeURIComponent(userCode)}`;
+}
+
+function authFlowFor(accountId, forceRefresh = false) {
+  const cacheDir = launcherDataPath('accounts', accountId);
+  fs.mkdirSync(cacheDir, { recursive: true });
+
+  return new Authflow(
+    accountId,
+    cacheDir,
+    forceRefresh ? { flow: 'live', forceRefresh: true } : undefined,
+    (code) => {
+      const userCode = code.user_code || code.userCode || '';
+      const verificationUri = code.verification_uri || code.verificationUri || 'https://microsoft.com/link';
+      const directVerificationUri = buildMicrosoftDirectVerificationUrl(code);
+      const payload = {
+        userCode,
+        verificationUri,
+        directVerificationUri,
+        message: userCode
+          ? 'Microsoft sign-in opened with your code prefilled. Sign in and continue.'
+          : (code.message || '')
+      };
+      send('auth-code', payload);
+      if (directVerificationUri) shell.openExternal(directVerificationUri);
+    }
+  );
+}
+
+async function getMinecraftSession(accountId, forceRefresh = false) {
+  const flow = authFlowFor(accountId, forceRefresh);
+  const result = await flow.getMinecraftJavaToken({ fetchProfile: true });
+  if (!result?.token || !result?.profile) {
+    throw new Error('Microsoft sign-in completed, but no Minecraft Java profile was returned. Make sure the account owns Minecraft Java Edition.');
+  }
+  return result;
+}
+
+function toMclcAuthorization(session) {
+  return {
+    access_token: session.token,
+    client_token: crypto.randomUUID(),
+    uuid: session.profile.id,
+    name: session.profile.name,
+    user_properties: '{}',
+    meta: { type: 'msa', demo: false, xuid: '', clientId: '' }
+  };
+}
+
+function bindLauncherEvents() {
+  if (launcherEventsBound) return;
+  launcherEventsBound = true;
+  launcher.on('debug', (line) => log(line, 'debug'));
+  launcher.on('data', (line) => log(line, 'game'));
+}
+
+// ---------------------------
+// IPC
+// ---------------------------
+
+ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION }));
+ipcMain.handle('settings:save', async (_event, next) => {
+  const saved = await saveSettings(next);
+  applyUiScale(saved.uiScale);
+  pushThemeToLogWindow(saved.theme);
+  return { ...saved, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+});
+ipcMain.handle('appearance:set-theme', async (_event, theme) => {
+  const normalized = normalizeLauncherTheme(theme);
+  const current = await loadSettings();
+  const saved = await saveSettings({ ...current, theme: normalized });
+  pushThemeToLogWindow(normalized);
+  return { ...saved, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+});
+ipcMain.handle('logs:open', async (_event, theme) => {
+  let normalized = normalizeLauncherTheme(theme);
+  if (!theme) normalized = normalizeLauncherTheme((await loadSettings()).theme);
+  createLogWindow(normalized);
+  return true;
+});
+ipcMain.handle('logs:get-history', async () => logBuffer.slice());
+ipcMain.handle('logs:clear', async () => {
+  logBuffer.length = 0;
+  send('logs-cleared', true);
+  if (logWindow && !logWindow.isDestroyed()) logWindow.webContents.send('logs-cleared', true);
+  return true;
+});
+
+ipcMain.handle('account:skin-data', async (_event, accountId) => {
+  const settings = await loadSettings();
+  const account = settings.accounts.find((a) => a.id === accountId);
+  if (!account) throw new Error('Account not found.');
+
+  const preferred = /^https:\/\//i.test(account.skinUrl || '')
+    ? account.skinUrl
+    : `https://mc-heads.net/skin/${encodeURIComponent(account.uuid)}`;
+  try {
+    const bytes = await request(preferred, { binary: true });
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  } catch (error) {
+    const fallback = `https://mc-heads.net/skin/${encodeURIComponent(account.uuid)}`;
+    if (preferred === fallback) throw error;
+    const bytes = await request(fallback, { binary: true });
+    return `data:image/png;base64,${bytes.toString('base64')}`;
+  }
+});
+
+ipcMain.handle('client:info', async () => ({ productName: PRODUCT_NAME, gameVersion: GAME_VERSION, gameDirectory: APPDATA_ROOT, managedJavaPath: managedJavaPath(), javaMajor: JAVA_MAJOR }));
+ipcMain.handle('client:prepare', async () => prepareClient());
+ipcMain.handle('game:get-status', async () => ({
+  running: Boolean(activeGameProcess && activeGameProcess.exitCode == null),
+  pid: activeGameProcess?.pid || null
+}));
+
+ipcMain.handle('window:control', async (_event, action) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (action === 'minimize') mainWindow.minimize();
+  else if (action === 'maximize') mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  else if (action === 'close') mainWindow.close();
+  else throw new Error('Unknown window action.');
+  return true;
+});
+
+ipcMain.handle('dialog:choose-java', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Java 25 executable',
+    properties: ['openFile'],
+    filters: process.platform === 'win32' ? [{ name: 'Java', extensions: ['exe'] }] : []
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('folder:open-client', async () => {
+  await ensureDirs();
+  await shell.openPath(APPDATA_ROOT);
+  return true;
+});
+
+ipcMain.handle('folder:open-mods', async () => {
+  await ensureDirs();
+  await shell.openPath(p('mods'));
+  return true;
+});
+
+ipcMain.handle('mods:list', async () => {
+  // Opening/refreshing the Mods tab is also an opportunity to keep Fabric API current.
+  await ensureFabricApi({ silent: true }).catch((error) => log(`Fabric API mod-list update check failed: ${error.message}`, 'debug'));
+  return listInstalledMods();
+});
+ipcMain.handle('mods:search', async (_event, query, page) => searchModrinthMods(query, page));
+ipcMain.handle('mods:statuses', async (_event, projectIds) => getModrinthProjectStatuses(projectIds));
+ipcMain.handle('mods:install', async (_event, projectId) => installModrinthProject(projectId));
+ipcMain.handle('mods:remove', async (_event, filename) => removeInstalledMod(filename));
+
+ipcMain.handle('account:add', async () => {
+  const settings = await loadSettings();
+  const accountId = crypto.randomUUID();
+  send('auth-state', { state: 'starting' });
+  try {
+    const session = await getMinecraftSession(accountId, false);
+    const profile = session.profile;
+    const account = {
+      id: accountId,
+      uuid: profile.id,
+      name: profile.name,
+      skinUrl: profile.skins?.find((s) => s.state === 'ACTIVE')?.url || profile.skins?.[0]?.url || ''
+    };
+    settings.accounts = [...settings.accounts.filter((a) => a.uuid !== account.uuid), account];
+    settings.selectedAccountId = account.id;
+    await saveSettings(settings);
+    send('auth-state', { state: 'complete', account });
+    return account;
+  } catch (error) {
+    await fsp.rm(launcherDataPath('accounts', accountId), { recursive: true, force: true }).catch(() => {});
+    send('auth-state', { state: 'error', message: error.message });
+    throw error;
+  }
+});
+
+ipcMain.handle('account:select', async (_event, accountId) => {
+  const settings = await loadSettings();
+  if (!settings.accounts.some((a) => a.id === accountId)) throw new Error('Account not found.');
+  settings.selectedAccountId = accountId;
+  await saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('account:remove', async (_event, accountId) => {
+  const settings = await loadSettings();
+  settings.accounts = settings.accounts.filter((a) => a.id !== accountId);
+  if (settings.selectedAccountId === accountId) settings.selectedAccountId = settings.accounts[0]?.id || null;
+  await saveSettings(settings);
+  await fsp.rm(launcherDataPath('accounts', accountId), { recursive: true, force: true }).catch(() => {});
+  return { ...settings, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+});
+
+ipcMain.handle('game:stop', async () => {
+  const child = activeGameProcess;
+  if (!child || child.exitCode != null) {
+    activeGameProcess = null;
+    send('game-state', { state: 'stopped', text: 'SpectorClient is not running.' });
+    return { ok: false, alreadyStopped: true };
+  }
+
+  send('game-state', { state: 'stopping', text: 'Stopping SpectorClient…' });
+
+  if (process.platform === 'win32' && child.pid) {
+    await new Promise((resolve, reject) => {
+      execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, (error) => {
+        // If the process exited while taskkill was starting, treat that as success.
+        if (error && activeGameProcess === child && child.exitCode == null) reject(error);
+        else resolve();
+      });
+    });
+  } else {
+    const stopped = child.kill('SIGTERM');
+    if (!stopped && child.exitCode == null) throw new Error('Could not stop the Minecraft process.');
+
+    // Escalate only if the Java process ignores SIGTERM.
+    setTimeout(() => {
+      if (activeGameProcess === child && child.exitCode == null) {
+        try { child.kill('SIGKILL'); } catch {}
+      }
+    }, 5000).unref?.();
+  }
+
+  return { ok: true };
+});
+
+ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
+  if (activeGameProcess) throw new Error('SpectorClient is already running.');
+
+  const settings = await loadSettings();
+  const merged = { ...settings, ...launchInput };
+
+  // v1.5.7: always open the detached Logs window at the very start of launch
+  // so Java/client/auth/game output is visible without a sidebar Logs button.
+  createLogWindow(merged.theme || settings.theme || 'classic');
+  const account = settings.accounts.find((a) => a.id === merged.selectedAccountId);
+  if (!account) throw new Error('Sign in with a Microsoft account first.');
+
+  const minRam = Math.max(2, Number(merged.minRamGb) || 4);
+  const maxRam = Math.max(minRam, Number(merged.maxRamGb) || 6);
+  await saveSettings(merged);
+
+  let javaExecutable = merged.javaPath?.trim() || '';
+  if (!javaExecutable) {
+    send('game-state', { state: 'installing', text: 'Preparing Java 25…' });
+    javaExecutable = await ensureManagedJava25();
+  }
+
+  send('game-state', { state: 'installing', text: 'Checking client files…' });
+  const fabric = await prepareClient();
+
+  send('game-state', { state: 'authenticating', text: 'Refreshing Microsoft/Minecraft session…' });
+  const session = await getMinecraftSession(account.id, false);
+  const authorization = toMclcAuthorization(session);
+
+  const opts = {
+    authorization,
+    root: APPDATA_ROOT,
+    version: {
+      number: GAME_VERSION,
+      type: 'release',
+      custom: fabric.versionId
+    },
+    memory: { min: `${minRam}G`, max: `${maxRam}G` },
+    window: {
+      width: String(Math.max(640, Number(merged.width) || 1280)),
+      height: String(Math.max(480, Number(merged.height) || 720)),
+      fullscreen: Boolean(merged.fullscreen)
+    },
+    customLaunchArgs: [],
+    customArgs: []
+  };
+
+  opts.javaPath = javaExecutable;
+  if (merged.serverAddress?.trim()) {
+    opts.quickPlay = { type: 'multiplayer', identifier: merged.serverAddress.trim() };
+  }
+
+  bindLauncherEvents();
+  send('game-state', { state: 'launching', text: `Launching SpectorClient ${GAME_VERSION}…` });
+
+  try {
+    const child = await launcher.launch(opts);
+    activeGameProcess = child;
+    send('game-state', { state: 'running', text: 'SpectorClient is running.' });
+    if (merged.closeLauncherOnStart && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+
+    child.once('exit', (code) => {
+      activeGameProcess = null;
+      send('game-state', { state: 'stopped', text: `SpectorClient exited${code == null ? '' : ` with code ${code}`}.` });
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    });
+    return { ok: true };
+  } catch (error) {
+    activeGameProcess = null;
+    send('game-state', { state: 'error', text: error.message });
+    throw error;
+  }
+});
+
+ipcMain.handle('updater:check', async () => {
+  if (!app.isPackaged) return { ok: false, development: true };
+  const result = await autoUpdater.checkForUpdates();
+  return { ok: true, updateInfo: makeIpcSafe(result?.updateInfo || null) };
+});
+
+ipcMain.handle('external:open', async (_event, url) => {
+  if (!/^https:\/\//i.test(url)) throw new Error('Only HTTPS links are allowed.');
+  await shell.openExternal(url);
+  return true;
+});
+
+app.whenReady().then(async () => {
+  app.setName(PRODUCT_NAME);
+  if (process.platform === 'win32') app.setAppUserModelId('client.spector.launcher');
+  await ensureDirs();
+  createWindow();
+  setupAutoUpdater();
+
+  // Install SpectorClient's private Java 25 runtime automatically on first launch.
+  // It lives under %APPDATA%\spectorclient and does not require a system-wide Java install.
+  setTimeout(() => {
+    ensureManagedJava25().catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
+  }, 450);
+
+  // Fabric API is a required SpectorClient core mod. Check it quietly every launcher start.
+  setTimeout(() => {
+    ensureFabricApi({ silent: true }).catch((error) => log(`Fabric API startup update check failed: ${error.message}`, 'debug'));
+  }, 1200);
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('before-quit', () => {
+  if (updaterInterval) clearInterval(updaterInterval);
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
