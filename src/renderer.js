@@ -984,10 +984,17 @@ window.launcher.onGameState((data) => {
 
 window.launcher.onUpdateState((data) => {
   if (!data?.state) return;
-  if (data.state === 'available') showToast(data.text || 'A SpectorClient update is available.', 3600);
+  if (data.state === 'available') showToast(data.text || 'A SpectorClient update is available and downloading.', 3600);
+  if (data.state === 'waiting-for-game') {
+    showToast(data.text || 'Update ready. It will install automatically when Minecraft closes.', 6000);
+  }
   if (data.state === 'downloaded') {
     playUiSound('success');
-    showToast(data.text || 'Launcher update downloaded. It will install when SpectorClient closes.', 5200);
+    showToast(data.text || 'Launcher update downloaded. Installing now…', 4200);
+  }
+  if (data.state === 'installing-update') {
+    playUiSound('success');
+    showToast(data.text || 'Installing SpectorClient update now…', 4200);
   }
   if (data.state === 'error') showToast(data.text || 'Could not check for launcher updates.', 3600);
 });

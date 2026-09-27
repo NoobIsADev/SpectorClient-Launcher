@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.0",
-  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with GitHub Releases auto-updates",
+  "version": "1.6.1",
+  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with near-immediate safe GitHub auto-updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",

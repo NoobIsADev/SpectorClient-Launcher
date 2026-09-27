@@ -44,7 +44,12 @@ let fabricApiRefreshPromise = null;
 let javaInstallPromise = null;
 let updaterInitialized = false;
 let updaterInterval = null;
+let updaterCheckPromise = null;
 let lastUpdaterProgressBucket = -1;
+let downloadedUpdateInfo = null;
+let updateInstallPending = false;
+let updateInstallStarting = false;
+let gameLaunchInProgress = false;
 
 // The UI was designed around this content area. The preferred user scale is
 // automatically capped to a fit scale whenever the window is too small.
@@ -428,6 +433,21 @@ function createWindow() {
   mainWindow.on('leave-full-screen', reapplyScale);
   mainWindow.on('resize', () => scheduleFitScale());
 
+  // If an update is already downloaded while Minecraft is active, keep the
+  // launcher alive in the background so it can install the update the instant
+  // the game exits. Closing the window simply hides it until then.
+  mainWindow.on('close', (event) => {
+    if (updateInstallPending && !updateInstallStarting && (isMinecraftRunning() || gameLaunchInProgress)) {
+      event.preventDefault();
+      mainWindow.hide();
+      log('[Updater] Update is ready. SpectorClient will stay in the background until Minecraft closes.', 'updater');
+      emitUpdateState('waiting-for-game', {
+        version: downloadedUpdateInfo?.version || null,
+        text: 'Update ready. Waiting for Minecraft to close before installing…'
+      });
+    }
+  });
+
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
 
@@ -564,6 +584,54 @@ function emitUpdateState(state, extra = {}) {
   return payload;
 }
 
+function isMinecraftRunning() {
+  return Boolean(activeGameProcess && activeGameProcess.exitCode == null);
+}
+
+function clearUpdaterPolling() {
+  if (updaterInterval) {
+    clearInterval(updaterInterval);
+    updaterInterval = null;
+  }
+}
+
+function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
+  if (!updateInstallPending || updateInstallStarting || !app.isPackaged) return false;
+
+  const version = downloadedUpdateInfo?.version || 'new version';
+  if (isMinecraftRunning() || gameLaunchInProgress) {
+    log(`[Updater] SpectorClient ${version} is ready. Waiting for Minecraft to close before installing.`, 'updater');
+    emitUpdateState('waiting-for-game', {
+      version,
+      text: `SpectorClient ${version} is ready. It will update automatically when Minecraft closes.`
+    });
+    return false;
+  }
+
+  updateInstallStarting = true;
+  clearUpdaterPolling();
+  log(`[Updater] Installing SpectorClient ${version} now (${reason})…`, 'updater');
+  emitUpdateState('installing-update', {
+    version,
+    text: `Installing SpectorClient ${version} now…`
+  });
+
+  // Give the renderer/log window a brief moment to paint the final status before
+  // electron-updater closes the launcher and runs the NSIS installer.
+  setTimeout(() => {
+    try {
+      autoUpdater.quitAndInstall(false, true);
+    } catch (error) {
+      updateInstallStarting = false;
+      const message = error?.message || String(error);
+      log(`[Updater] Could not start the update installer: ${message}`, 'updater');
+      emitUpdateState('error', { text: `Could not install launcher update: ${message}` });
+    }
+  }, 700).unref?.();
+
+  return true;
+}
+
 function setupAutoUpdater() {
   if (updaterInitialized || !app.isPackaged) {
     if (!app.isPackaged) log('[Updater] Development build detected; automatic updates are disabled.', 'updater');
@@ -572,7 +640,10 @@ function setupAutoUpdater() {
 
   updaterInitialized = true;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // We intentionally control installation ourselves. This prevents an update
+  // from installing merely because the launcher is closed while Minecraft is
+  // still running.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
 
   autoUpdater.on('checking-for-update', () => {
@@ -582,10 +653,10 @@ function setupAutoUpdater() {
 
   autoUpdater.on('update-available', (info) => {
     lastUpdaterProgressBucket = -1;
-    log(`[Updater] SpectorClient ${info.version} is available. Downloading in the background…`, 'updater');
+    log(`[Updater] SpectorClient ${info.version} is available. Downloading immediately…`, 'updater');
     emitUpdateState('available', {
       version: info.version,
-      text: `SpectorClient ${info.version} is available. Downloading…`
+      text: `SpectorClient ${info.version} is available. Downloading now…`
     });
   });
 
@@ -609,12 +680,26 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
+    downloadedUpdateInfo = makeIpcSafe(info || {});
+    updateInstallPending = true;
     const version = info?.version || 'new version';
-    log(`[Updater] SpectorClient ${version} downloaded. It will install when the launcher closes.`, 'updater');
+    clearUpdaterPolling();
+
+    if (isMinecraftRunning() || gameLaunchInProgress) {
+      log(`[Updater] SpectorClient ${version} downloaded. Minecraft is active, so installation will wait for the game to close.`, 'updater');
+      emitUpdateState('waiting-for-game', {
+        version,
+        text: `SpectorClient ${version} downloaded. It will update automatically when Minecraft closes.`
+      });
+      return;
+    }
+
+    log(`[Updater] SpectorClient ${version} downloaded. Installing immediately…`, 'updater');
     emitUpdateState('downloaded', {
       version,
-      text: `SpectorClient ${version} is ready and will install when the launcher closes.`
+      text: `SpectorClient ${version} downloaded. Installing now…`
     });
+    installDownloadedUpdateWhenSafe('download completed');
   });
 
   autoUpdater.on('error', (error) => {
@@ -623,16 +708,28 @@ function setupAutoUpdater() {
     emitUpdateState('error', { text: `Updater error: ${message}` });
   });
 
-  const check = () => autoUpdater.checkForUpdates().catch((error) => {
-    const message = error?.message || String(error);
-    log(`[Updater] Could not check for updates: ${message}`, 'updater');
-    emitUpdateState('error', { text: `Could not check for updates: ${message}` });
-  });
+  const check = () => {
+    if (updateInstallPending || updateInstallStarting) return updaterCheckPromise;
+    if (updaterCheckPromise) return updaterCheckPromise;
 
-  // Delay the first check slightly so Java/Fabric startup housekeeping is not competing
-  // with the updater for network/disk resources during the first renderer frame.
-  setTimeout(check, 5000).unref?.();
-  updaterInterval = setInterval(check, 4 * 60 * 60 * 1000);
+    updaterCheckPromise = autoUpdater.checkForUpdates()
+      .catch((error) => {
+        const message = error?.message || String(error);
+        log(`[Updater] Could not check for updates: ${message}`, 'updater');
+        emitUpdateState('error', { text: `Could not check for updates: ${message}` });
+      })
+      .finally(() => {
+        updaterCheckPromise = null;
+      });
+
+    return updaterCheckPromise;
+  };
+
+  // GitHub Releases is polled because desktop clients do not receive a push
+  // notification from GitHub. Check almost immediately, then once per minute so
+  // a newly-published release normally reaches an open launcher within ~60 sec.
+  setTimeout(check, 1000).unref?.();
+  updaterInterval = setInterval(check, 60 * 1000);
   updaterInterval.unref?.();
 }
 
@@ -1410,81 +1507,105 @@ ipcMain.handle('game:stop', async () => {
 });
 
 ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
-  if (activeGameProcess) throw new Error('SpectorClient is already running.');
-
-  const settings = await loadSettings();
-  const merged = { ...settings, ...launchInput };
-
-  // v1.5.7: always open the detached Logs window at the very start of launch
-  // so Java/client/auth/game output is visible without a sidebar Logs button.
-  createLogWindow(merged.theme || settings.theme || 'classic');
-  const account = settings.accounts.find((a) => a.id === merged.selectedAccountId);
-  if (!account) throw new Error('Sign in with a Microsoft account first.');
-
-  const minRam = Math.max(2, Number(merged.minRamGb) || 4);
-  const maxRam = Math.max(minRam, Number(merged.maxRamGb) || 6);
-  await saveSettings(merged);
-
-  let javaExecutable = merged.javaPath?.trim() || '';
-  if (!javaExecutable) {
-    send('game-state', { state: 'installing', text: 'Preparing Java 25…' });
-    javaExecutable = await ensureManagedJava25();
+  if (activeGameProcess || gameLaunchInProgress) throw new Error('SpectorClient is already running or launching.');
+  if (updateInstallPending && !updateInstallStarting) {
+    installDownloadedUpdateWhenSafe('Play was pressed while an update was ready');
+    throw new Error('A SpectorClient update is installing. The launcher will restart automatically.');
   }
 
-  send('game-state', { state: 'installing', text: 'Checking client files…' });
-  const fabric = await prepareClient();
-
-  send('game-state', { state: 'authenticating', text: 'Refreshing Microsoft/Minecraft session…' });
-  const session = await getMinecraftSession(account.id, false);
-  const authorization = toMclcAuthorization(session);
-
-  const opts = {
-    authorization,
-    root: APPDATA_ROOT,
-    version: {
-      number: GAME_VERSION,
-      type: 'release',
-      custom: fabric.versionId
-    },
-    memory: { min: `${minRam}G`, max: `${maxRam}G` },
-    window: {
-      width: String(Math.max(640, Number(merged.width) || 1280)),
-      height: String(Math.max(480, Number(merged.height) || 720)),
-      fullscreen: Boolean(merged.fullscreen)
-    },
-    customLaunchArgs: [],
-    customArgs: []
-  };
-
-  opts.javaPath = javaExecutable;
-  if (merged.serverAddress?.trim()) {
-    opts.quickPlay = { type: 'multiplayer', identifier: merged.serverAddress.trim() };
-  }
-
-  bindLauncherEvents();
-  send('game-state', { state: 'launching', text: `Launching SpectorClient ${GAME_VERSION}…` });
+  gameLaunchInProgress = true;
 
   try {
+    const settings = await loadSettings();
+    const merged = { ...settings, ...launchInput };
+
+    // v1.5.7+: always open the detached Logs window at the very start of launch
+    // so Java/client/auth/game output is visible without a sidebar Logs button.
+    createLogWindow(merged.theme || settings.theme || 'classic');
+    const account = settings.accounts.find((a) => a.id === merged.selectedAccountId);
+    if (!account) throw new Error('Sign in with a Microsoft account first.');
+
+    const minRam = Math.max(2, Number(merged.minRamGb) || 4);
+    const maxRam = Math.max(minRam, Number(merged.maxRamGb) || 6);
+    await saveSettings(merged);
+
+    let javaExecutable = merged.javaPath?.trim() || '';
+    if (!javaExecutable) {
+      send('game-state', { state: 'installing', text: 'Preparing Java 25…' });
+      javaExecutable = await ensureManagedJava25();
+    }
+
+    send('game-state', { state: 'installing', text: 'Checking client files…' });
+    const fabric = await prepareClient();
+
+    send('game-state', { state: 'authenticating', text: 'Refreshing Microsoft/Minecraft session…' });
+    const session = await getMinecraftSession(account.id, false);
+    const authorization = toMclcAuthorization(session);
+
+    const opts = {
+      authorization,
+      root: APPDATA_ROOT,
+      version: {
+        number: GAME_VERSION,
+        type: 'release',
+        custom: fabric.versionId
+      },
+      memory: { min: `${minRam}G`, max: `${maxRam}G` },
+      window: {
+        width: String(Math.max(640, Number(merged.width) || 1280)),
+        height: String(Math.max(480, Number(merged.height) || 720)),
+        fullscreen: Boolean(merged.fullscreen)
+      },
+      customLaunchArgs: [],
+      customArgs: []
+    };
+
+    opts.javaPath = javaExecutable;
+    if (merged.serverAddress?.trim()) {
+      opts.quickPlay = { type: 'multiplayer', identifier: merged.serverAddress.trim() };
+    }
+
+    bindLauncherEvents();
+    send('game-state', { state: 'launching', text: `Launching SpectorClient ${GAME_VERSION}…` });
+
     const child = await launcher.launch(opts);
     activeGameProcess = child;
+    gameLaunchInProgress = false;
     send('game-state', { state: 'running', text: 'SpectorClient is running.' });
     if (merged.closeLauncherOnStart && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
 
     child.once('exit', (code) => {
       activeGameProcess = null;
       send('game-state', { state: 'stopped', text: `SpectorClient exited${code == null ? '' : ` with code ${code}`}.` });
+
+      // If an update arrived while the user was playing, install it immediately
+      // now that Java/Minecraft has fully exited.
+      if (updateInstallPending) {
+        installDownloadedUpdateWhenSafe('Minecraft exited');
+        return;
+      }
+
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
     });
     return { ok: true };
   } catch (error) {
-    activeGameProcess = null;
-    send('game-state', { state: 'error', text: error.message });
+    gameLaunchInProgress = false;
+    if (!activeGameProcess) send('game-state', { state: 'error', text: error.message });
+
+    // If an update completed while launch preparation was in progress but the
+    // launch failed, it is now safe to install instead of leaving it pending.
+    if (updateInstallPending && !isMinecraftRunning()) {
+      setTimeout(() => installDownloadedUpdateWhenSafe('game launch ended'), 300).unref?.();
+    }
     throw error;
   }
 });
 
 ipcMain.handle('updater:check', async () => {
   if (!app.isPackaged) return { ok: false, development: true };
+  if (updateInstallPending || updateInstallStarting) {
+    return { ok: true, pendingInstall: true, updateInfo: downloadedUpdateInfo };
+  }
   const result = await autoUpdater.checkForUpdates();
   return { ok: true, updateInfo: makeIpcSafe(result?.updateInfo || null) };
 });
@@ -1519,7 +1640,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
-  if (updaterInterval) clearInterval(updaterInterval);
+  clearUpdaterPolling();
 });
 
 app.on('window-all-closed', () => {
