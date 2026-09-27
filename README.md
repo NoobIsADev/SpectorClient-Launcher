@@ -1,1 +1,1 @@
-# SpectorClient Launcher v1.6.1
+# SpectorClient Launcher v1.6.2

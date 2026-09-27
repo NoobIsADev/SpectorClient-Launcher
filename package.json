@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.1",
-  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with near-immediate safe GitHub auto-updates",
+  "version": "1.6.2",
+  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with safe verified GitHub auto-updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
@@ -16,7 +16,8 @@
     "predist": "npm run fetch-brand",
     "predist:win": "npm run fetch-brand",
     "predist:portable": "npm run fetch-brand",
-    "release:win": "npm run fetch-brand && electron-builder --win nsis --publish always"
+    "release:win": "npm run fetch-brand && electron-builder --win nsis --publish never",
+    "build:release": "npm run release:win"
   },
   "dependencies": {
     "minecraft-launcher-core": "3.18.2",

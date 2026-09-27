@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: spectorclient-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-windows:
     runs-on: windows-latest
@@ -22,18 +26,118 @@ jobs:
           node-version: '22'
 
       - name: Verify tag matches package version
+        id: version
         shell: pwsh
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
-          $expected = "v$($package.version)"
+          $version = [string]$package.version
+          $expected = "v$version"
           if ("${{ github.ref_name }}" -ne $expected) {
             throw "Tag ${{ github.ref_name }} does not match package.json version $expected"
           }
+          "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build and publish NSIS release
-        run: npm run release:win
+      # Build locally only. Publishing from electron-builder caused the EXE,
+      # blockmap and latest.yml publishers to race while creating the same
+      # GitHub Release. We publish exactly once in the steps below instead.
+      - name: Build NSIS updater artifacts
+        run: npm run build:release
+
+      - name: Verify updater artifacts before publishing
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $required = @(
+            "dist/SpectorClient-$version-x64.exe",
+            "dist/SpectorClient-$version-x64.exe.blockmap",
+            "dist/latest.yml"
+          )
+
+          foreach ($file in $required) {
+            if (-not (Test-Path -LiteralPath $file)) {
+              throw "Required update artifact is missing: $file"
+            }
+            $size = (Get-Item -LiteralPath $file).Length
+            if ($size -le 0) {
+              throw "Required update artifact is empty: $file"
+            }
+            Write-Host "Verified $file ($size bytes)"
+          }
+
+          $latest = Get-Content -LiteralPath 'dist/latest.yml' -Raw
+          if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
+            throw "dist/latest.yml does not advertise version $version"
+          }
+
+      - name: Create clean draft release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.version.outputs.version }}"
+
+          # A rerun may find a partial release from a previous failed attempt.
+          # Remove only the release object; the Git tag remains intact.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Removing existing release object for $tag before rebuilding it..."
+            gh release delete $tag --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove the existing release for $tag" }
+          }
+
+          gh release create $tag --draft --title "SpectorClient $version" --target "${{ github.sha }}" --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $tag" }
+
+      - name: Upload all updater artifacts to draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.version.outputs.version }}"
+          gh release upload $tag `
+            "dist/SpectorClient-$version-x64.exe" `
+            "dist/SpectorClient-$version-x64.exe.blockmap" `
+            "dist/latest.yml" `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts for $tag" }
+
+      - name: Verify draft release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $required = @(
+            "SpectorClient-$version-x64.exe",
+            "SpectorClient-$version-x64.exe.blockmap",
+            "latest.yml"
+          )
+
+          $json = gh release view $tag --json assets
+          if ($LASTEXITCODE -ne 0) { throw "Could not read draft release assets for $tag" }
+          $release = $json | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+
+          foreach ($name in $required) {
+            if ($names -notcontains $name) {
+              throw "Draft release is missing required asset: $name"
+            }
+            Write-Host "Release contains $name"
+          }
+
+      # Only make the release visible to electron-updater after all three files
+      # exist. This prevents clients from seeing a half-published release.
+      - name: Publish verified release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish verified release $tag" }

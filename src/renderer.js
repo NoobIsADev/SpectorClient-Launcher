@@ -996,7 +996,11 @@ window.launcher.onUpdateState((data) => {
     playUiSound('success');
     showToast(data.text || 'Installing SpectorClient update now…', 4200);
   }
-  if (data.state === 'error') showToast(data.text || 'Could not check for launcher updates.', 3600);
+  if (data.state === 'retrying') showToast(data.text || 'Update check will retry automatically.', 3600);
+  if (data.state === 'error') {
+    playUiSound('error');
+    showToast(data.text || 'Could not check for launcher updates. Retrying automatically.', 4200);
+  }
 });
 
 window.launcher.onGameLog((data) => {

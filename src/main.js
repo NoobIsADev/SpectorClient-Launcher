@@ -50,6 +50,8 @@ let downloadedUpdateInfo = null;
 let updateInstallPending = false;
 let updateInstallStarting = false;
 let gameLaunchInProgress = false;
+let lastUpdaterErrorFingerprint = '';
+let lastUpdaterErrorAt = 0;
 
 // The UI was designed around this content area. The preferred user scale is
 // automatically capped to a fit scale whenever the window is too small.
@@ -632,6 +634,62 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
   return true;
 }
 
+
+
+function normalizeUpdaterError(error) {
+  const raw = error?.message || String(error || 'Unknown updater error');
+  const firstLine = raw.split(/\r?\n/)[0].trim();
+  const missingLatestMetadata = /latest\.yml/i.test(raw) && (/(?:404|not found)/i.test(raw) || /cannot find latest\.yml/i.test(raw));
+  const rateLimited = /(?:rate limit|403)/i.test(raw) && /github/i.test(raw);
+  const networkIssue = /(?:ENOTFOUND|ECONNRESET|ETIMEDOUT|network|socket hang up)/i.test(raw);
+
+  if (missingLatestMetadata) {
+    return {
+      raw,
+      logMessage: firstLine,
+      state: 'retrying',
+      text: 'The newest launcher release is still publishing. SpectorClient will retry automatically.'
+    };
+  }
+  if (rateLimited) {
+    return {
+      raw,
+      logMessage: firstLine,
+      state: 'retrying',
+      text: 'GitHub temporarily limited update checks. SpectorClient will retry automatically.'
+    };
+  }
+  if (networkIssue) {
+    return {
+      raw,
+      logMessage: firstLine,
+      state: 'retrying',
+      text: 'Could not reach the update server. SpectorClient will retry automatically.'
+    };
+  }
+  return {
+    raw,
+    logMessage: firstLine,
+    state: 'error',
+    text: 'Could not check for launcher updates. SpectorClient will retry automatically.'
+  };
+}
+
+function handleUpdaterError(error, context = 'Update check failed') {
+  const detail = normalizeUpdaterError(error);
+  const fingerprint = `${detail.state}|${detail.logMessage}`;
+  const now = Date.now();
+
+  // electron-updater can surface the same failure through both its `error`
+  // event and the rejected checkForUpdates() promise. Avoid duplicate UI/logs.
+  if (fingerprint === lastUpdaterErrorFingerprint && now - lastUpdaterErrorAt < 3000) return;
+  lastUpdaterErrorFingerprint = fingerprint;
+  lastUpdaterErrorAt = now;
+
+  log(`[Updater] ${context}: ${detail.logMessage}`, 'updater');
+  emitUpdateState(detail.state, { text: detail.text });
+}
+
 function setupAutoUpdater() {
   if (updaterInitialized || !app.isPackaged) {
     if (!app.isPackaged) log('[Updater] Development build detected; automatic updates are disabled.', 'updater');
@@ -703,9 +761,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
-    const message = error?.message || String(error);
-    log(`[Updater] Update check failed: ${message}`, 'updater');
-    emitUpdateState('error', { text: `Updater error: ${message}` });
+    handleUpdaterError(error, 'Update check failed');
   });
 
   const check = () => {
@@ -714,9 +770,7 @@ function setupAutoUpdater() {
 
     updaterCheckPromise = autoUpdater.checkForUpdates()
       .catch((error) => {
-        const message = error?.message || String(error);
-        log(`[Updater] Could not check for updates: ${message}`, 'updater');
-        emitUpdateState('error', { text: `Could not check for updates: ${message}` });
+        handleUpdaterError(error, 'Could not check for updates');
       })
       .finally(() => {
         updaterCheckPromise = null;

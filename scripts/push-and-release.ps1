@@ -91,11 +91,11 @@ try {
         Write-Host "[5/6] Creating release tag $Tag..." -ForegroundColor Cyan
         & git ls-remote --exit-code --tags origin "refs/tags/$Tag" *> $null
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "$Tag already exists on GitHub, so it will not be recreated." -ForegroundColor Yellow
-        } else {
-            Run-Git @('tag', '-a', $Tag, '-m', "SpectorClient $Version")
-            Run-Git @('push', 'origin', $Tag)
+            throw "$Tag already exists on GitHub. Bump package.json to a new version before releasing again."
         }
+
+        Run-Git @('tag', '-a', $Tag, '-m', "SpectorClient $Version")
+        Run-Git @('push', 'origin', $Tag)
 
         Write-Host '[6/6] Done.' -ForegroundColor Green
         Write-Host ''
