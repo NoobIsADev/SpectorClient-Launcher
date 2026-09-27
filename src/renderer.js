@@ -253,12 +253,10 @@ async function renderPlayer() {
   $('homeAccountName').textContent = account?.name || 'No account selected';
   const canvas = $('skinViewerCanvas');
   const fallback = $('playerSkinFallback');
-  const hint = $('skinDragHint');
   const placeholder = $('skinPlaceholder');
 
   skinLoadSerial += 1;
   canvas.classList.add('hidden');
-  hint.classList.add('hidden');
   fallback.classList.add('hidden');
   fallback.removeAttribute('src');
 
@@ -271,7 +269,6 @@ async function renderPlayer() {
   const loaded = await loadInteractiveSkin(account);
   if (loaded && selectedAccount()?.id === account.id) {
     canvas.classList.remove('hidden');
-    hint.classList.remove('hidden');
     return;
   }
 
