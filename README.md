@@ -1,7 +1,7 @@
-# SpectorClient Launcher v1.6.9
+# SpectorClient Launcher v1.6.10
 
 
-## Automatic launcher updates (v1.6.9)
+## Automatic launcher updates (v1.6.10)
 
 Packaged NSIS installs check GitHub Releases about one second after startup and then every 60 seconds while no update is already pending. New releases download automatically. If Minecraft is not running, SpectorClient immediately restarts into the updater as soon as the download finishes. If Minecraft is running (or still launching), SpectorClient waits in the background and installs the downloaded update automatically the moment the game exits.
 
@@ -18,14 +18,14 @@ Electron launcher for **Minecraft Java 26.2 + Fabric**, using a separate Spector
 
 This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`. Packaged NSIS installs check for launcher updates automatically, download newer releases in the background, and install the downloaded update when the launcher closes.
 
-The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.9`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
+The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.10`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
 
 ### One-click first publish
 
 On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication on your own PC, copies this prepared source into the repository, pushes `main`, and pushes the matching version tag so GitHub Actions creates the release. No GitHub token needs to be pasted into ChatGPT or stored in the launcher.
 
 
-## What changed in v1.6.9
+## What changed in v1.6.10
 
 - Removed the Home-screen **Check files** status row and button entirely. Client preparation still happens automatically when you press **Play**.
 - Removed the **26.2 • FABRIC** label from the top title bar. The client remains locked to Minecraft 26.2 + Fabric internally.
@@ -95,7 +95,7 @@ On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication 
 - The branding asset is downloaded automatically before development start or Windows builds.
 - SpectorClient mod download now uses:
   `https://spectorclient.com/mod/download`
-- Every **Play** refresh deletes only SpectorClient's fixed client JAR (`spectorclient.jar`, plus the one known legacy filename during migration) and redownloads it. It does **not** wildcard-delete other mods. The manual Check files control was removed in v1.6.9.
+- Every **Play** refresh deletes only SpectorClient's fixed client JAR (`spectorclient.jar`, plus the one known legacy filename during migration) and redownloads it. It does **not** wildcard-delete other mods. The manual Check files control was removed in v1.6.10.
 
 ## Requirements
 
@@ -217,16 +217,16 @@ The old branding script hand-built `build/icon.ico` by embedding the downloaded 
 This build now keeps the Imgur logo as `build/icon.png` and lets electron-builder generate the correct multi-size Windows ICO automatically. If you previously built v1.3.5, delete any old `build/icon.ico` and `dist` folder before rebuilding. The included `fetch-brand` script also removes the stale ICO automatically.
 
 
-## v1.6.9 theme correction
+## v1.6.10 theme correction
 
 The Classic, Crimson, and Prince themes now recolor the complete launcher chrome rather than only the main accent. Navigation icons, cave lighting, cards, borders, account controls, settings panels, Modrinth controls, pagination, inputs, mod cards, scrollbars, dialogs, toasts, and the detached Logs window all inherit the selected palette. Normal `0%` transparency uses solid dark themed surfaces; the existing transparency slider still allows intentional transparency up to 100%. The in-launcher Spector logo is also color-shifted for Crimson and Prince.
 
 
-## v1.6.9 — NO TRANSPARENCY
+## v1.6.10 — NO TRANSPARENCY
 
 The launcher window is now fully opaque at the Electron/Windows level. `transparent` is disabled, the transparent-window background was removed, and the old transparency slider/setting was removed. Classic, Crimson, and Prince remain fully themed without showing the desktop through the launcher.
 
-## v1.6.9 UI update
+## v1.6.10 UI update
 
 - Keeps the Electron window fully opaque (`transparent: false`).
 - Restores the original subtle internal bars/panel layering instead of the heavy solid 1.4.2 structural bands.
@@ -241,19 +241,19 @@ The launcher window is now fully opaque at the Electron/Windows level. `transpar
 Home screen center background now downloads from https://i.imgur.com/QS6Qx8V.png and is applied with CSS cover so it zooms/crops instead of stretching.
 
 
-### v1.6.9
+### v1.6.10
 The detached Logs window now receives theme changes live from the main launcher. Theme selections are saved immediately, so Classic, Crimson, and Prince stay synchronized across both windows.
 
 
 ## UI sounds
-SpectorClient 1.6.9 adds synthesized launcher UI sounds with an Enable launcher sounds toggle and 0–100% volume control under Settings > Appearance & sounds. Sounds cover hover, click, Play/Stop, successful launches/sign-ins, errors, theme changes, and mod actions. No external audio files are required.
+SpectorClient 1.6.10 adds synthesized launcher UI sounds with an Enable launcher sounds toggle and 0–100% volume control under Settings > Appearance & sounds. Sounds cover hover, click, Play/Stop, successful launches/sign-ins, errors, theme changes, and mod actions. No external audio files are required.
 
 
 ## Classic Pink theme
 A new Classic Pink light-pink launcher theme is included alongside the unchanged Classic, Crimson, and Prince themes. It also applies to the detached Logs window.
 
 
-### v1.6.9 branding
+### v1.6.10 branding
 The SpectorClient logo is center-zoomed by 10% during asset preparation. The same processed PNG is used by the launcher UI, Electron window/taskbar icon, and Windows build icon.
 
 
@@ -267,12 +267,12 @@ On first launcher start, SpectorClient automatically downloads the latest GA Ecl
 The launcher now opens the direct Microsoft verification link with the device code prefilled when supported. The code is still displayed in the launcher as a fallback.
 
 
-## v1.6.9 fix
+## v1.6.10 fix
 
 Fixed the first-launch Java 25 downloader crash (`Failed to serialize arguments`). The Java runtime downloader now has its own function and IPC payloads are sanitized before being sent to the renderer.
 
 
-### v1.6.9 Logs behavior
+### v1.6.10 Logs behavior
 - The detached Logs window opens automatically when Play is pressed.
 - The Logs sidebar button was removed.
 - The old Logs popout toggle was removed because launch logs now always open in a separate window.
@@ -280,23 +280,23 @@ Fixed the first-launch Java 25 downloader crash (`Failed to serialize arguments`
 
 ## Automatic launcher updates (GitHub Releases)
 
-SpectorClient 1.6.9+ uses `electron-updater` with GitHub Releases from `NoobIsADev/SpectorClient-Launcher`.
+SpectorClient 1.6.10+ uses `electron-updater` with GitHub Releases from `NoobIsADev/SpectorClient-Launcher`.
 Packaged NSIS installs check for updates shortly after startup and every four hours while open. Updates download in the background and install when the launcher closes, so an active Minecraft session is not interrupted.
 
 ### Publish a new version
 
-1. Change `version` in `package.json` (for example `1.6.9` -> `1.6.9`).
+1. Change `version` in `package.json` (for example `1.6.10` -> `1.6.10`).
 2. Commit and push the change to `main`.
 3. Create and push a matching tag:
 
 ```powershell
-git tag v1.6.9
-git push origin v1.6.9
+git tag v1.6.10
+git push origin v1.6.10
 ```
 
 The GitHub Actions workflow builds the Windows NSIS installer and publishes the release, including the updater metadata (`latest.yml` and blockmap). The tag must exactly match the `package.json` version.
 
-Existing users on versions older than 1.6.9 must install the first updater-enabled NSIS release manually once. Later releases can update automatically.
+Existing users on versions older than 1.6.10 must install the first updater-enabled NSIS release manually once. Later releases can update automatically.
 
 > Push helper fix: this package preserves the cloned repository `.git` directory while copying release source.
 
@@ -305,13 +305,13 @@ Existing users on versions older than 1.6.9 must install the first updater-enabl
 This package includes the corrected one-click Git push/release helper with safe Git argument handling.
 
 
-## v1.6.9 updater publishing fix
+## v1.6.10 updater publishing fix
 
 The GitHub Actions release flow now builds the NSIS installer, blockmap, and `latest.yml` **before** creating a public release. It uploads all three to a draft, verifies that every required asset is present, and only then publishes the release. This prevents installed launchers from seeing a partially-published release.
 
 Updater network/metadata failures are also reduced to short user-facing messages while the launcher retries automatically; full HTTP response bodies are no longer dumped into UI toasts.
 
-## v1.6.9 updater fix
+## v1.6.10 updater fix
 
 - Updates install silently in-place with no NSIS Next/Install clicks.
 - The packaged launcher explicitly uses `NoobIsADev/SpectorClient-Launcher` as its GitHub update feed.
@@ -320,7 +320,7 @@ Updater network/metadata failures are also reduced to short user-facing messages
 - `npm start` is still development mode and cannot replace itself; test auto-updates using the installed NSIS build from a GitHub Release.
 
 
-## v1.6.9 updater hardening
+## v1.6.10 updater hardening
 - Uses electron-builder's generated `app-update.yml` instead of overriding the feed at runtime.
 - Full-installer updates are used for reliability (differential patching disabled).
 - Checks every 15 seconds while the launcher is open.
@@ -328,12 +328,12 @@ Updater network/metadata failures are also reduced to short user-facing messages
 - GitHub Actions validates release assets, hashes, and the public `releases/latest/download` updater endpoint before accepting a release.
 
 
-### v1.6.9 update notifications
+### v1.6.10 update notifications
 - Native Windows notification when a launcher update is detected and begins downloading.
 - Native Windows notification immediately before the update installer starts.
 - Removed duplicate in-launcher update lifecycle toast popups.
 
 
-## v1.6.9 updater verification fix
+## v1.6.10 updater verification fix
 
 The release workflow verifies the exact tagged updater metadata and installer URLs and polls GitHub's latest-release API directly. It no longer treats the cached `releases/latest/download` shortcut as authoritative or automatically re-drafts an otherwise valid release because that shortcut is slow to refresh.

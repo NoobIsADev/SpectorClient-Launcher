@@ -223,12 +223,25 @@ jobs:
           $metadataUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/latest.yml"
           $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/SpectorClient-$version-x64.exe"
 
-          $metadata = Invoke-WebRequest -Uri $metadataUrl -Headers $headers -MaximumRedirection 10
+          # GitHub serves latest.yml as application/octet-stream. In PowerShell 7,
+          # Invoke-WebRequest can expose that body as Byte[], and casting Byte[]
+          # to [string] produces "System.Byte[]" instead of the YAML text. Download
+          # it to disk first, then read the actual UTF-8 text.
+          $verifyDir = Join-Path $env:RUNNER_TEMP "spector-update-verify-$version"
+          New-Item -ItemType Directory -Force -Path $verifyDir | Out-Null
+          $metadataFile = Join-Path $verifyDir 'latest.yml'
+          Remove-Item -LiteralPath $metadataFile -Force -ErrorAction SilentlyContinue
+
+          $metadata = Invoke-WebRequest -Uri $metadataUrl -Headers $headers -MaximumRedirection 10 -OutFile $metadataFile -PassThru
           if ($metadata.StatusCode -ne 200) { throw "Tagged latest.yml returned HTTP $($metadata.StatusCode)" }
-          $latestText = [string]$metadata.Content
+          if (-not (Test-Path -LiteralPath $metadataFile)) { throw 'Tagged latest.yml was not downloaded' }
+          if ((Get-Item -LiteralPath $metadataFile).Length -le 0) { throw 'Tagged latest.yml download is empty' }
+
+          $latestText = Get-Content -LiteralPath $metadataFile -Raw -Encoding UTF8
           if ($latestText -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") { throw "Tagged latest.yml is not version $version" }
           if ($latestText -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) { throw 'Tagged latest.yml points to the wrong installer' }
 
+          # Verify the installer URL resolves without downloading the full EXE.
           $installerHead = Invoke-WebRequest -Uri $installerUrl -Method Head -Headers $headers -MaximumRedirection 10
           if ($installerHead.StatusCode -lt 200 -or $installerHead.StatusCode -ge 400) { throw "Tagged installer returned HTTP $($installerHead.StatusCode)" }
 
