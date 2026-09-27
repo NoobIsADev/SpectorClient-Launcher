@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -56,6 +56,8 @@ let backgroundForUpdate = false;
 let gameLaunchInProgress = false;
 let lastUpdaterErrorFingerprint = '';
 let lastUpdaterErrorAt = 0;
+let lastNativeUpdateNoticeVersion = '';
+let lastNativeInstallNoticeVersion = '';
 
 // The UI was designed around this content area. The preferred user scale is
 // automatically capped to a fit scale whenever the window is too small.
@@ -592,6 +594,41 @@ function log(line, type = 'launcher') {
 }
 
 
+function showNativeWindowsNotification(title, body, { version = '', kind = 'update' } = {}) {
+  if (process.platform !== 'win32' || !Notification.isSupported()) {
+    log(`[Updater] Windows notification unavailable: ${title} — ${body}`, 'updater');
+    return false;
+  }
+
+  if (kind === 'available' && version && lastNativeUpdateNoticeVersion === version) return false;
+  if (kind === 'installing' && version && lastNativeInstallNoticeVersion === version) return false;
+
+  try {
+    const notice = new Notification({
+      title: String(title || PRODUCT_NAME),
+      body: String(body || ''),
+      icon: BRAND_IMAGE_PATH,
+      silent: false
+    });
+
+    notice.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+      }
+    });
+
+    notice.show();
+    if (kind === 'available' && version) lastNativeUpdateNoticeVersion = version;
+    if (kind === 'installing' && version) lastNativeInstallNoticeVersion = version;
+    return true;
+  } catch (error) {
+    log(`[Updater] Could not show Windows notification: ${error?.message || error}`, 'updater');
+    return false;
+  }
+}
+
 function emitUpdateState(state, extra = {}) {
   const payload = { state, ...makeIpcSafe(extra), at: Date.now() };
   send('update-state', payload);
@@ -625,6 +662,11 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
   updateInstallStarting = true;
   clearUpdaterPolling();
   log(`[Updater] Installing SpectorClient ${version} now (${reason})…`, 'updater');
+  showNativeWindowsNotification(
+    'SpectorClient Update Installing',
+    `Installing SpectorClient ${version} now. The launcher will restart automatically when it is finished.`,
+    { version, kind: 'installing' }
+  );
   emitUpdateState('installing-update', {
     version,
     text: `Installing SpectorClient ${version} now…`
@@ -766,6 +808,14 @@ function setupAutoUpdater() {
     updateDownloadInProgress = true;
     lastUpdaterProgressBucket = -1;
     log(`[Updater] SpectorClient ${info.version} is available. Downloading immediately…`, 'updater');
+    const updateNoticeBody = (isMinecraftRunning() || gameLaunchInProgress)
+      ? `SpectorClient ${info.version} is downloading now and will install automatically after Minecraft closes.`
+      : `SpectorClient ${info.version} is downloading automatically.`;
+    showNativeWindowsNotification(
+      'SpectorClient Update Available',
+      updateNoticeBody,
+      { version: info.version, kind: 'available' }
+    );
     emitUpdateState('available', {
       version: info.version,
       text: `SpectorClient ${info.version} is available. Downloading now…`
@@ -823,7 +873,7 @@ function setupAutoUpdater() {
   });
 
   const check = () => {
-    if (updateInstallPending || updateInstallStarting) return updaterCheckPromise;
+    if (updateInstallPending || updateInstallStarting || updateDownloadInProgress) return updaterCheckPromise;
     if (updaterCheckPromise) return updaterCheckPromise;
 
     updaterCheckPromise = autoUpdater.checkForUpdates()

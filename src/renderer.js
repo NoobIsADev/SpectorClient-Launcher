@@ -981,18 +981,10 @@ window.launcher.onGameState((data) => {
 
 window.launcher.onUpdateState((data) => {
   if (!data?.state) return;
-  if (data.state === 'available') showToast(data.text || 'A SpectorClient update is available and downloading.', 3600);
-  if (data.state === 'waiting-for-game') {
-    showToast(data.text || 'Update ready. It will install automatically when Minecraft closes.', 6000);
-  }
-  if (data.state === 'downloaded') {
-    playUiSound('success');
-    showToast(data.text || 'Launcher update downloaded. Installing now…', 4200);
-  }
-  if (data.state === 'installing-update') {
-    playUiSound('success');
-    showToast(data.text || 'Installing SpectorClient update now…', 4200);
-  }
+
+  // Normal update lifecycle messages are delivered through native Windows
+  // notifications by the Electron main process. Keep in-app toasts only for
+  // failures/retry states so the user is not shown duplicate update popups.
   if (data.state === 'retrying') showToast(data.text || 'Update check will retry automatically.', 3600);
   if (data.state === 'error') {
     playUiSound('error');
