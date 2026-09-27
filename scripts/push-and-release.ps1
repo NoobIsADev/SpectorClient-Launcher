@@ -97,11 +97,53 @@ try {
         Run-Git @('tag', '-a', $Tag, '-m', "SpectorClient $Version")
         Run-Git @('push', 'origin', $Tag)
 
-        Write-Host '[6/6] Done.' -ForegroundColor Green
+        Write-Host '[6/8] Waiting for the GitHub Actions release build...' -ForegroundColor Cyan
+        $ApiHeaders = @{ 'User-Agent' = 'SpectorClient-Release-Script'; 'Cache-Control' = 'no-cache' }
+        $Run = $null
+        for ($i = 1; $i -le 30; $i++) {
+            try {
+                $runs = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoName/actions/runs?branch=$Tag&per_page=5" -Headers $ApiHeaders
+                $Run = @($runs.workflow_runs | Where-Object { $_.head_branch -eq $Tag }) | Select-Object -First 1
+                if ($Run) { break }
+            } catch {}
+            Start-Sleep -Seconds 4
+        }
+        if (-not $Run) {
+            throw "GitHub Actions did not start for $Tag. Check https://github.com/$RepoName/actions"
+        }
+
+        while ($true) {
+            $Run = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoName/actions/runs/$($Run.id)" -Headers $ApiHeaders
+            Write-Host "  Release workflow: $($Run.status)" -ForegroundColor DarkCyan
+            if ($Run.status -eq 'completed') { break }
+            Start-Sleep -Seconds 10
+        }
+        if ($Run.conclusion -ne 'success') {
+            throw "GitHub Actions failed for $Tag. Open $($Run.html_url) to see the failed step."
+        }
+
+        Write-Host '[7/8] Verifying published updater files...' -ForegroundColor Cyan
+        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoName/releases/tags/$Tag" -Headers $ApiHeaders
+        $ExpectedAssets = @(
+            "SpectorClient-$Version-x64.exe",
+            "SpectorClient-$Version-x64.exe.blockmap",
+            'latest.yml'
+        )
+        $ActualAssets = @($Release.assets | ForEach-Object { $_.name })
+        foreach ($Asset in $ExpectedAssets) {
+            if ($ActualAssets -notcontains $Asset) {
+                throw "GitHub release $Tag is missing $Asset even though the workflow completed."
+            }
+        }
+        if ($Release.draft -or $Release.prerelease) {
+            throw "GitHub release $Tag was not published as a normal release."
+        }
+
+        Write-Host '[8/8] Done.' -ForegroundColor Green
         Write-Host ''
-        Write-Host "GitHub Actions will build and publish SpectorClient $Version automatically." -ForegroundColor Green
-        Write-Host 'Actions:  https://github.com/NoobIsADev/SpectorClient-Launcher/actions' -ForegroundColor Green
-        Write-Host 'Releases: https://github.com/NoobIsADev/SpectorClient-Launcher/releases' -ForegroundColor Green
+        Write-Host "SpectorClient $Version is published with all updater files." -ForegroundColor Green
+        Write-Host "Release: $($Release.html_url)" -ForegroundColor Green
+        Write-Host 'Actions: https://github.com/NoobIsADev/SpectorClient-Launcher/actions' -ForegroundColor Green
     }
     finally {
         Pop-Location

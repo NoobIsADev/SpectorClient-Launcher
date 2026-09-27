@@ -51,7 +51,7 @@ jobs:
       - name: Build NSIS updater artifacts
         run: npm run build:release
 
-      - name: Verify updater artifacts and checksums before publishing
+      - name: Verify updater artifacts before publishing
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
@@ -86,6 +86,24 @@ jobs:
           }
           Write-Host 'latest.yml checksum matches the NSIS installer.'
 
+      - name: Remove stale failed draft releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # v1.6.5 and v1.6.6 failed after creating drafts because draft releases
+          # are not returned by /releases/tags/{tag}. Remove those known failed drafts.
+          $staleTags = @('v1.6.5', 'v1.6.6')
+          $releases = gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json
+          foreach ($staleTag in $staleTags) {
+            $matches = @($releases | Where-Object { $_.draft -eq $true -and $_.tag_name -eq $staleTag })
+            foreach ($release in $matches) {
+              Write-Host "Removing stale failed draft $staleTag (release id $($release.id))..."
+              gh api -X DELETE "repos/${{ github.repository }}/releases/$($release.id)"
+              if ($LASTEXITCODE -ne 0) { throw "Could not remove stale draft release $staleTag" }
+            }
+          }
+
       - name: Create clean draft release
         shell: pwsh
         env:
@@ -118,7 +136,7 @@ jobs:
             --clobber
           if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts for $tag" }
 
-      - name: Verify uploaded release assets and digests
+      - name: Verify uploaded draft assets and digests
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,13 +149,24 @@ jobs:
             "latest.yml"
           )
 
-          $release = gh api "repos/${{ github.repository }}/releases/tags/$tag" | ConvertFrom-Json
+          # IMPORTANT: /releases/tags/{tag} returns 404 for draft releases.
+          # Ask gh release view for the draft's database ID, then query by ID.
+          $viewJson = gh release view $tag --json databaseId,tagName,isDraft
+          if ($LASTEXITCODE -ne 0) { throw "Could not resolve draft release $tag" }
+          $view = $viewJson | ConvertFrom-Json
+          if ($view.tagName -ne $tag) { throw "Resolved release tag is $($view.tagName), expected $tag" }
+          if (-not $view.isDraft) { throw "Release $tag must still be a draft during verification" }
+          if (-not $view.databaseId) { throw "Draft release $tag has no database ID" }
+
+          $release = gh api "repos/${{ github.repository }}/releases/$($view.databaseId)" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not read draft release $tag by ID" }
           $assets = @($release.assets)
+
           foreach ($name in $expectedFiles) {
             $asset = $assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
             if (-not $asset) { throw "Draft release is missing required asset: $name" }
             if ([int64]$asset.size -le 0) { throw "Draft release asset is empty: $name" }
-            Write-Host "Release contains $name ($($asset.size) bytes)"
+            Write-Host "Draft contains $name ($($asset.size) bytes)"
           }
 
           $exeName = "SpectorClient-$version-x64.exe"
@@ -170,7 +199,7 @@ jobs:
           $ok = $false
           $lastError = $null
 
-          for ($attempt = 1; $attempt -le 12; $attempt++) {
+          for ($attempt = 1; $attempt -le 18; $attempt++) {
             try {
               Write-Host "Public updater verification attempt $attempt..."
               $latestResponse = Invoke-WebRequest -Uri $latestUrl -Headers @{ 'Cache-Control'='no-cache'; 'User-Agent'='SpectorClient-Release-Verification' } -MaximumRedirection 10
@@ -186,10 +215,16 @@ jobs:
               if ($apiRelease.tag_name -ne $tag) { throw "GitHub latest release is $($apiRelease.tag_name), expected $tag" }
               if ($apiRelease.draft -or $apiRelease.prerelease) { throw 'latest release is not a normal published release' }
 
+              $assetNames = @($apiRelease.assets | ForEach-Object { $_.name })
+              foreach ($required in @("latest.yml", "SpectorClient-$version-x64.exe", "SpectorClient-$version-x64.exe.blockmap")) {
+                if ($assetNames -notcontains $required) { throw "published release is missing $required" }
+              }
+
               $ok = $true
               break
             } catch {
               $lastError = $_
+              Write-Host "Attempt $attempt failed: $($_.Exception.Message)"
               Start-Sleep -Seconds 5
             }
           }
