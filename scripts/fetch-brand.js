@@ -6,7 +6,7 @@ const { PNG } = require('pngjs');
 const { version: LAUNCHER_VERSION } = require('../package.json');
 
 const BRAND_URL = 'https://i.imgur.com/nP9aVFe.png';
-const PLAYER_BACKGROUND_URL = 'https://i.imgur.com/QS6Qx8V.png';
+const PLAYER_BACKGROUND_URL = 'https://i.imgur.com/8fwRz1h.jpeg';
 const ROOT = path.resolve(__dirname, '..');
 const UI_PNG_PATH = path.join(ROOT, 'src', 'assets', 'spector-logo.png');
 const PLAYER_BACKGROUND_PATH = path.join(ROOT, 'src', 'assets', 'player-background.png');
@@ -121,7 +121,7 @@ async function prepareLogo() {
 
 async function preparePlayerBackground() {
   try {
-    const image = await fetchBuffer(PLAYER_BACKGROUND_URL, 8, 'https://media.essential.gg/');
+    const image = await fetchBuffer(PLAYER_BACKGROUND_URL, 8, 'https://imgur.com/');
     if (image.length < 4096) throw new Error('Downloaded player background is unexpectedly small.');
     await fsp.writeFile(PLAYER_BACKGROUND_PATH, image);
     process.stdout.write(`Player scene background updated: ${PLAYER_BACKGROUND_PATH}\n`);

@@ -1,6 +1,6 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.10",
+  "version": "1.6.11",
   "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with native Windows update notifications and automatic updates",
   "main": "src/main.js",
   "author": "SpectorClient",
