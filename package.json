@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.11",
-  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with native Windows update notifications and automatic updates",
+  "version": "1.6.12",
+  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with reliable automatic updates and installer process cleanup",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
@@ -50,7 +50,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "SpectorClient"
+      "shortcutName": "SpectorClient",
+      "include": "build/installer.nsh"
     },
     "publish": {
       "provider": "github",

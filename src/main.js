@@ -9,6 +9,14 @@ const { Authflow } = require('prismarine-auth');
 const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
 
+// Keep only one SpectorClient process alive. Multiple launcher processes can
+// keep files in the install directory locked and make NSIS fail while replacing
+// an older version. A second launch focuses the existing window instead.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 const PRODUCT_NAME = 'SpectorClient';
 const GAME_VERSION = '26.2';
 const SPECTOR_MOD_URL = 'https://spectorclient.com/mod/download';
@@ -672,10 +680,17 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
     text: `Installing SpectorClient ${version} now…`
   });
 
-  // Give the renderer/log window a brief moment to paint the final status before
-  // electron-updater closes the launcher and runs the NSIS installer.
+  // Give the renderer/log window a brief moment to paint the final status.
+  // Then close every BrowserWindow ourselves before handing control to NSIS.
+  // This avoids renderer/GPU handles keeping files locked during replacement.
   setTimeout(() => {
     try {
+      if (logWindow && !logWindow.isDestroyed()) logWindow.destroy();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+      app.releaseSingleInstanceLock();
+
+      // isSilent=true: no installer wizard. forceRunAfter=true: restart the
+      // updated launcher once NSIS has replaced the installed application.
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
       updateInstallStarting = false;
@@ -685,7 +700,7 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
       log(`[Updater] Could not start the update installer: ${message}`, 'updater');
       emitUpdateState('error', { text: `Could not install launcher update: ${message}` });
     }
-  }, 700).unref?.();
+  }, 1000).unref?.();
 
   return true;
 }
@@ -1785,7 +1800,17 @@ ipcMain.handle('external:open', async (_event, url) => {
   return true;
 });
 
+app.on('second-instance', () => {
+  if (!hasSingleInstanceLock) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   app.setName(PRODUCT_NAME);
   if (process.platform === 'win32') app.setAppUserModelId('client.spector.launcher');
   await ensureDirs();
@@ -1813,5 +1838,8 @@ app.on('before-quit', () => {
 });
 
 app.on('window-all-closed', () => {
+  // During an update we intentionally destroy the windows before
+  // autoUpdater.quitAndInstall(). Do not race that call with app.quit().
+  if (updateInstallStarting) return;
   if (process.platform !== 'darwin') app.quit();
 });
