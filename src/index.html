@@ -110,28 +110,37 @@
           <button id="openModsFolderBtn" class="secondary-btn">Open mods folder</button>
         </div>
 
-        <div class="mods-toolbar">
-          <div class="search-box">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
-            <input id="modSearchInput" maxlength="100" placeholder="Search Modrinth for Fabric 26.2 mods..." />
-            <button id="modSearchBtn" class="accent-btn">Search</button>
+        <div class="mod-tabs" role="tablist" aria-label="Mod manager sections">
+          <button id="installModsTab" class="mod-tab active" data-mod-tab="install" role="tab" aria-selected="true">Install Mods</button>
+          <button id="installedModsTab" class="mod-tab" data-mod-tab="installed" role="tab" aria-selected="false">Installed <span id="installedTabCount">0</span></button>
+        </div>
+        <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
+
+        <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
+          <div class="mods-toolbar">
+            <div class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+              <input id="modSearchInput" maxlength="100" placeholder="Search Modrinth for Fabric 26.2 mods..." />
+              <button id="modSearchBtn" class="accent-btn">Search</button>
+            </div>
           </div>
-          <div id="modManagerStatus" class="manager-status">Ready.</div>
+
+          <div class="mod-section-title browser-title">
+            <div><h3>Browse Modrinth</h3><span>Only Fabric + Minecraft 26.2 results</span></div>
+          </div>
+          <div id="modSearchResults" class="mod-results">
+            <div class="empty-state compact-empty"><b>Search for a mod</b><span>Try Sodium, Iris, Mod Menu, or any other Fabric mod.</span></div>
+          </div>
+          <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
         </div>
 
-        <div class="mod-section-title">
-          <div><h3>Installed</h3><span id="installedCount">0 mods</span></div>
-          <button id="refreshModsBtn" class="text-btn">Refresh</button>
+        <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed">
+          <div class="mod-section-title installed-tab-title">
+            <div><h3>Installed Mods</h3><span id="installedCount">0 mods</span></div>
+            <button id="refreshModsBtn" class="text-btn">Refresh</button>
+          </div>
+          <div id="installedMods" class="installed-list"></div>
         </div>
-        <div id="installedMods" class="installed-list"></div>
-
-        <div class="mod-section-title browser-title">
-          <div><h3>Browse Modrinth</h3><span>Only Fabric + Minecraft 26.2 results</span></div>
-        </div>
-        <div id="modSearchResults" class="mod-results">
-          <div class="empty-state compact-empty"><b>Search for a mod</b><span>Try Sodium, Iris, Mod Menu, or any other Fabric mod.</span></div>
-        </div>
-        <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
       </section>
 
       <section id="view-accounts" class="view scroll-view">

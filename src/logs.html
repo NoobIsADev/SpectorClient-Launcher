@@ -19,8 +19,40 @@
         <button id="clearBtn">Clear</button>
       </div>
     </header>
+
+    <section class="log-toolbar" aria-label="Log filters">
+      <div class="log-search-wrap">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+        <input id="logSearch" type="search" placeholder="Filter log text..." autocomplete="off" />
+      </div>
+      <div class="filter-group" aria-label="Source filters">
+        <button class="filter-chip active" data-source="all">All sources</button>
+        <button class="filter-chip" data-source="launcher">Launcher</button>
+        <button class="filter-chip" data-source="game">Game</button>
+        <button class="filter-chip" data-source="updater">Updater</button>
+        <button class="filter-chip" data-source="debug">Debug</button>
+      </div>
+      <div class="filter-group level-filters" aria-label="Severity filters">
+        <button class="filter-chip active" data-level="all">All levels</button>
+        <button class="filter-chip" data-level="info">Info</button>
+        <button class="filter-chip" data-level="warn">Warn</button>
+        <button class="filter-chip" data-level="error">Error</button>
+        <button class="filter-chip" data-level="debug">Debug</button>
+      </div>
+    </section>
+
+    <section class="log-summary" aria-label="Log summary">
+      <div><span>Total</span><b id="totalCount">0</b></div>
+      <div><span>Visible</span><b id="visibleCount">0</b></div>
+      <div><span>Warnings</span><b id="warningCount">0</b></div>
+      <div><span>Errors</span><b id="errorCount">0</b></div>
+      <div class="log-state"><span>Status</span><b id="streamState">Live</b></div>
+    </section>
+
     <main>
-      <pre id="logOutput">No logs yet.</pre>
+      <div id="logOutput" class="log-output" role="log" aria-live="polite">
+        <div class="log-empty">No logs yet.</div>
+      </div>
     </main>
   </div>
   <script src="logs.js"></script>

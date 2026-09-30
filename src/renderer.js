@@ -15,6 +15,7 @@ let modSearchTotalPages = 1;
 let modSearchTotal = 0;
 let modSearchPageSize = 24;
 let modSearchQuery = '';
+let activeModTab = 'install';
 let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
@@ -206,10 +207,7 @@ function showView(name) {
 
   if (name === 'mods') {
     refreshInstalledMods();
-    if (!modBrowseLoaded) {
-      modBrowseLoaded = true;
-      searchMods('');
-    }
+    setModTab(activeModTab);
   }
 }
 
@@ -497,6 +495,25 @@ async function startAddAccount() {
   }
 }
 
+function setModTab(tab) {
+  activeModTab = tab === 'installed' ? 'installed' : 'install';
+  document.querySelectorAll('[data-mod-tab]').forEach((button) => {
+    const active = button.dataset.modTab === activeModTab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-mod-panel]').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.modPanel === activeModTab);
+  });
+
+  if (activeModTab === 'installed') {
+    refreshInstalledMods();
+  } else if (!modBrowseLoaded) {
+    modBrowseLoaded = true;
+    searchMods('');
+  }
+}
+
 function installedProjectIds() {
   return new Set(installedMods.filter((m) => m.projectId).map((m) => m.projectId));
 }
@@ -525,6 +542,8 @@ function updateButtonForInstalledMod(mod) {
 function renderInstalledMods() {
   const host = $('installedMods');
   $('installedCount').textContent = `${installedMods.length} mod${installedMods.length === 1 ? '' : 's'}`;
+  const tabCount = $('installedTabCount');
+  if (tabCount) tabCount.textContent = String(installedMods.length);
   if (!installedMods.length) {
     host.innerHTML = `<div class="empty-state"><div><b>No mods installed yet</b><span>Core client files will appear after “Check files” or your first launch.</span></div></div>`;
     return;
@@ -844,6 +863,9 @@ $('closeAuthModalBtn').addEventListener('click', () => $('authModal').classList.
 $('openAuthLinkBtn').addEventListener('click', () => currentAuthUrl && window.launcher.openExternal(currentAuthUrl));
 
 // Mods
+document.querySelectorAll('[data-mod-tab]').forEach((button) => {
+  button.addEventListener('click', () => setModTab(button.dataset.modTab));
+});
 $('openModsFolderBtn').addEventListener('click', () => window.launcher.openModsFolder());
 $('refreshModsBtn').addEventListener('click', refreshInstalledMods);
 $('modSearchBtn').addEventListener('click', () => searchMods($('modSearchInput').value, 1));

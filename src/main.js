@@ -594,8 +594,25 @@ function sendLogPayload(payload) {
   if (logWindow && !logWindow.isDestroyed()) logWindow.webContents.send('game-log', payload);
 }
 
+function classifyLogLevel(line, type = 'launcher') {
+  const text = String(line || '').toLowerCase();
+  if (/\b(error|failed|failure|exception|fatal|crash|unable to|could not)\b/.test(text)) return 'error';
+  if (/\b(warn|warning|retry|deprecated|waiting for|fallback)\b/.test(text)) return 'warn';
+  if (type === 'debug') return 'debug';
+  return 'info';
+}
+
 function log(line, type = 'launcher') {
-  const payload = { type, line: String(line), at: Date.now() };
+  const text = String(line);
+  const at = Date.now();
+  const payload = {
+    id: `${at}-${logBuffer.length}-${Math.random().toString(36).slice(2, 7)}`,
+    type: String(type || 'launcher'),
+    level: classifyLogLevel(text, type),
+    line: text,
+    at,
+    iso: new Date(at).toISOString()
+  };
   logBuffer.push(payload);
   if (logBuffer.length > MAX_LOG_LINES) logBuffer.splice(0, logBuffer.length - MAX_LOG_LINES);
   sendLogPayload(payload);
