@@ -6,6 +6,7 @@ let currentAuthUrl = '';
 let launching = false;
 let gameRunning = false;
 let stoppingGame = false;
+let runningGameVersion = null;
 let installedMods = [];
 let modStatuses = {};
 let lastSearchResults = [];
@@ -16,6 +17,7 @@ let modSearchTotal = 0;
 let modSearchPageSize = 24;
 let modSearchQuery = '';
 let activeModTab = 'install';
+let modsTargetVersion = null;
 let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
@@ -195,6 +197,86 @@ function formatDownloads(value) {
   return String(n);
 }
 
+function supportedGameVersions() {
+  const values = Array.isArray(clientInfo?.supportedVersions)
+    ? clientInfo.supportedVersions.map((entry) => String(entry.gameVersion || '')).filter(Boolean)
+    : ['26.2', '1.21.11'];
+  return values.length ? values : ['26.2', '1.21.11'];
+}
+
+function normalizeGameVersion(value) {
+  const candidate = String(value || '');
+  const supported = supportedGameVersions();
+  return supported.includes(candidate) ? candidate : (clientInfo?.defaultGameVersion || '26.2');
+}
+
+function selectedGameVersion() {
+  return normalizeGameVersion(settings?.selectedGameVersion);
+}
+
+function gameVersionDetails(gameVersion) {
+  const selected = normalizeGameVersion(gameVersion);
+  return clientInfo?.supportedVersions?.find((entry) => entry.gameVersion === selected) || {
+    gameVersion: selected,
+    label: `SpectorClient ${selected}`,
+    modsDirectory: selected === '26.2'
+      ? '%APPDATA%\\spectorclient\\mods'
+      : `%APPDATA%\\spectorclient\\instances\\${selected}\\mods`
+  };
+}
+
+function renderSelectedVersionUI() {
+  const gameVersion = selectedGameVersion();
+  if ($('selectedVersionLabel')) $('selectedVersionLabel').textContent = gameVersion;
+  if ($('settingsSelectedVersion')) $('settingsSelectedVersion').textContent = gameVersion;
+  document.querySelectorAll('[data-game-version]').forEach((button) => {
+    button.classList.toggle('selected', button.dataset.gameVersion === gameVersion);
+  });
+  updatePlayState();
+}
+
+function resetModsVersionSelection() {
+  modsTargetVersion = null;
+  modBrowseLoaded = false;
+  installedMods = [];
+  modStatuses = {};
+  lastSearchResults = [];
+  modSearchPage = 1;
+  modSearchTotalPages = 1;
+  modSearchTotal = 0;
+  modSearchQuery = '';
+  $('modVersionChooser')?.classList.remove('hidden');
+  $('modManagerContent')?.classList.add('hidden');
+  if ($('openModsFolderBtn')) $('openModsFolderBtn').disabled = true;
+  if ($('modsDescription')) $('modsDescription').textContent = 'Select a SpectorClient version first. Each version has its own mods folder and Modrinth library.';
+  if ($('installedTabCount')) $('installedTabCount').textContent = '0';
+  if ($('modSearchInput')) $('modSearchInput').value = '';
+}
+
+async function selectModsVersion(gameVersion) {
+  modsTargetVersion = normalizeGameVersion(gameVersion);
+  const details = gameVersionDetails(modsTargetVersion);
+  modBrowseLoaded = false;
+  installedMods = [];
+  modStatuses = {};
+  lastSearchResults = [];
+  modSearchPage = 1;
+  modSearchTotalPages = 1;
+  modSearchTotal = 0;
+  modSearchQuery = '';
+  $('modVersionChooser')?.classList.add('hidden');
+  $('modManagerContent')?.classList.remove('hidden');
+  $('openModsFolderBtn').disabled = false;
+  $('modSelectedVersionLabel').textContent = details.label || `SpectorClient ${modsTargetVersion}`;
+  $('modsDescription').innerHTML = `Managing <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Mods folder: <code>${escapeHtml(details.modsDirectory || '')}</code>`;
+  $('modSearchInput').placeholder = `Search Modrinth for Fabric ${modsTargetVersion} mods...`;
+  $('modBrowseSubtitle').textContent = `Only Fabric + Minecraft ${modsTargetVersion} results`;
+  $('modManagerStatus').textContent = `Loading ${details.label || modsTargetVersion} mods…`;
+  activeModTab = 'install';
+  await refreshInstalledMods();
+  setModTab('install');
+}
+
 function showView(name) {
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.classList.remove('active'));
@@ -206,8 +288,7 @@ function showView(name) {
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
-    refreshInstalledMods();
-    setModTab(activeModTab);
+    resetModsVersionSelection();
   }
 }
 
@@ -418,11 +499,13 @@ function fillSettings() {
   $('gameDirectory').textContent = clientInfo?.gameDirectory || settings?.gameDirectory || '%APPDATA%\\spectorclient';
   syncScaleUi(settings?.uiScale || 1);
   applyAppearanceSettings();
+  renderSelectedVersionUI();
 }
 
 function collectSettings() {
   return {
     ...settings,
+    selectedGameVersion: selectedGameVersion(),
     minRamGb: Number($('minRamGb').value),
     maxRamGb: Number($('maxRamGb').value),
     javaPath: $('javaPath').value.trim(),
@@ -445,16 +528,18 @@ function updatePlayState() {
   const button = $('playBtn');
   const icon = button.querySelector('.play-icon');
   const label = button.querySelector('b');
+  const selectedVersion = selectedGameVersion();
+  const displayVersion = gameRunning ? (runningGameVersion || selectedVersion) : selectedVersion;
 
   button.classList.toggle('stop-state', gameRunning || stoppingGame);
 
   if (gameRunning) {
     button.disabled = stoppingGame;
-    icon.textContent = stoppingGame ? '■' : '■';
+    icon.textContent = '■';
     label.textContent = stoppingGame ? 'STOPPING…' : 'STOP';
     $('playSubtext').textContent = stoppingGame
       ? 'Closing Minecraft…'
-      : `Minecraft 26.2 is running${account ? ` • ${account.name}` : ''}`;
+      : `Minecraft ${displayVersion} is running${account ? ` • ${account.name}` : ''}`;
     return;
   }
 
@@ -462,7 +547,7 @@ function updatePlayState() {
   icon.textContent = launching ? '…' : '▶';
   label.textContent = launching ? 'STARTING…' : 'PLAY';
   $('playSubtext').textContent = account
-    ? (launching ? 'Preparing Minecraft 26.2…' : `Minecraft 26.2 • ${account.name}`)
+    ? (launching ? `Preparing Minecraft ${displayVersion}…` : `Minecraft ${displayVersion} • ${account.name}`)
     : 'Sign in with Microsoft first';
 }
 
@@ -474,6 +559,7 @@ async function saveSettings(showStatus = true) {
   applyAppearanceSettings();
   syncScaleUi(settings.uiScale || 1);
   renderAllAccountUI();
+  renderSelectedVersionUI();
   if (showStatus) showToast('Settings saved.');
 }
 
@@ -496,6 +582,7 @@ async function startAddAccount() {
 }
 
 function setModTab(tab) {
+  if (!modsTargetVersion) return;
   activeModTab = tab === 'installed' ? 'installed' : 'install';
   document.querySelectorAll('[data-mod-tab]').forEach((button) => {
     const active = button.dataset.modTab === activeModTab;
@@ -522,7 +609,7 @@ async function refreshModStatuses(projectIds) {
   const ids = [...new Set((projectIds || []).filter(Boolean))];
   if (!ids.length) return;
   try {
-    const latest = await window.launcher.getModStatuses(ids);
+    const latest = await window.launcher.getModStatuses(modsTargetVersion, ids);
     modStatuses = { ...modStatuses, ...(latest || {}) };
   } catch (error) {
     console.warn('Could not check Modrinth update status:', error);
@@ -576,8 +663,8 @@ function renderInstalledMods() {
       button.textContent = 'Updating…';
       $('modManagerStatus').textContent = `Updating ${title} and all required dependencies…`;
       try {
-        const result = await window.launcher.installMod(projectId);
-        installedMods = result.mods || await window.launcher.listMods();
+        const result = await window.launcher.installMod(modsTargetVersion, projectId);
+        installedMods = result.mods || await window.launcher.listMods(modsTargetVersion);
         await refreshModStatuses(installedMods.filter((mod) => mod.projectId).map((mod) => mod.projectId));
         renderInstalledMods();
         renderSearchResults();
@@ -596,7 +683,7 @@ function renderInstalledMods() {
       if (!window.confirm(`Remove ${button.dataset.filename}?`)) return;
       button.disabled = true;
       try {
-        installedMods = await window.launcher.removeMod(button.dataset.filename);
+        installedMods = await window.launcher.removeMod(modsTargetVersion, button.dataset.filename);
         renderInstalledMods();
         renderSearchResults();
         $('modManagerStatus').textContent = 'Mod removed.';
@@ -609,8 +696,9 @@ function renderInstalledMods() {
 }
 
 async function refreshInstalledMods() {
+  if (!modsTargetVersion) return;
   try {
-    installedMods = await window.launcher.listMods();
+    installedMods = await window.launcher.listMods(modsTargetVersion);
     await refreshModStatuses(installedMods.filter((mod) => mod.projectId && !mod.core).map((mod) => mod.projectId));
     renderInstalledMods();
     renderSearchResults();
@@ -708,8 +796,8 @@ function renderSearchResults() {
       button.textContent = wasInstalled ? 'Updating…' : 'Installing…';
       $('modManagerStatus').textContent = `${wasInstalled ? 'Updating' : 'Installing'} ${mod?.title || 'mod'} and all required dependencies…`;
       try {
-        const result = await window.launcher.installMod(projectId);
-        installedMods = result.mods || await window.launcher.listMods();
+        const result = await window.launcher.installMod(modsTargetVersion, projectId);
+        installedMods = result.mods || await window.launcher.listMods(modsTargetVersion);
         await refreshModStatuses(installedMods.filter((item) => item.projectId).map((item) => item.projectId));
         renderInstalledMods();
         renderSearchResults();
@@ -727,6 +815,7 @@ function renderSearchResults() {
 }
 
 async function searchMods(query = $('modSearchInput').value, page = 1, resetOnQueryChange = true) {
+  if (!modsTargetVersion) return;
   const q = String(query || '').trim();
   const queryChanged = q !== modSearchQuery;
   if (resetOnQueryChange && queryChanged) page = 1;
@@ -736,11 +825,11 @@ async function searchMods(query = $('modSearchInput').value, page = 1, resetOnQu
   $('modSearchBtn').disabled = true;
   $('modManagerStatus').textContent = q
     ? `Searching Modrinth for “${q}” — page ${modSearchPage}…`
-    : `Loading popular Fabric 26.2 mods — page ${modSearchPage}…`;
-  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading Modrinth…</b><span>Filtering for Fabric + Minecraft 26.2.</span></div></div>`;
+    : `Loading popular Fabric ${modsTargetVersion} mods — page ${modSearchPage}…`;
+  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading Modrinth…</b><span>Filtering for Fabric + Minecraft ${escapeHtml(modsTargetVersion)}.</span></div></div>`;
   $('modPagination').classList.add('hidden');
   try {
-    const result = await window.launcher.searchMods(q, modSearchPage);
+    const result = await window.launcher.searchMods(modsTargetVersion, q, modSearchPage);
     lastSearchResults = Array.isArray(result) ? result : (result?.items || []);
     modSearchTotal = Array.isArray(result) ? lastSearchResults.length : Number(result?.total || 0);
     modSearchTotalPages = Array.isArray(result) ? 1 : Math.max(1, Number(result?.totalPages || 1));
@@ -826,7 +915,17 @@ window.launcher.onUiScale((data) => {
 });
 
 // Home
-$('versionBtn').addEventListener('click', () => showToast('SpectorClient is currently locked to Minecraft 26.2 + Fabric.'));
+$('versionBtn').addEventListener('click', () => showView('versions'));
+$('versionBackBtn').addEventListener('click', () => showView('home'));
+document.querySelectorAll('[data-game-version]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    settings.selectedGameVersion = normalizeGameVersion(button.dataset.gameVersion);
+    settings = await window.launcher.saveSettings(collectSettings());
+    renderSelectedVersionUI();
+    showView('home');
+    showToast(`Selected SpectorClient ${settings.selectedGameVersion}.`);
+  });
+});
 $('playBtn').addEventListener('click', async () => {
   if (gameRunning) {
     try {
@@ -863,10 +962,14 @@ $('closeAuthModalBtn').addEventListener('click', () => $('authModal').classList.
 $('openAuthLinkBtn').addEventListener('click', () => currentAuthUrl && window.launcher.openExternal(currentAuthUrl));
 
 // Mods
+document.querySelectorAll('[data-mod-game-version]').forEach((button) => {
+  button.addEventListener('click', () => selectModsVersion(button.dataset.modGameVersion));
+});
+$('changeModVersionBtn').addEventListener('click', resetModsVersionSelection);
 document.querySelectorAll('[data-mod-tab]').forEach((button) => {
   button.addEventListener('click', () => setModTab(button.dataset.modTab));
 });
-$('openModsFolderBtn').addEventListener('click', () => window.launcher.openModsFolder());
+$('openModsFolderBtn').addEventListener('click', () => modsTargetVersion && window.launcher.openModsFolder(modsTargetVersion));
 $('refreshModsBtn').addEventListener('click', refreshInstalledMods);
 $('modSearchBtn').addEventListener('click', () => searchMods($('modSearchInput').value, 1));
 $('modSearchInput').addEventListener('keydown', (event) => {
@@ -956,6 +1059,7 @@ window.launcher.onInstallState((data) => {
 });
 
 window.launcher.onModInstallState((data) => {
+  if (!modsTargetVersion || (data.gameVersion && data.gameVersion !== modsTargetVersion)) return;
   $('modManagerStatus').textContent = data.text || data.state || 'Installing mod…';
 });
 
@@ -970,6 +1074,7 @@ window.launcher.onGameState((data) => {
   }
 
   if (data.state === 'running') {
+    runningGameVersion = data.gameVersion || selectedGameVersion();
     launching = false;
     stoppingGame = false;
     gameRunning = true;
@@ -986,6 +1091,7 @@ window.launcher.onGameState((data) => {
   }
 
   if (['stopped', 'error'].includes(data.state)) {
+    runningGameVersion = null;
     launching = false;
     stoppingGame = false;
     gameRunning = false;
@@ -994,6 +1100,7 @@ window.launcher.onGameState((data) => {
   }
 
   if (['installing', 'authenticating', 'launching'].includes(data.state)) {
+    if (data.gameVersion) runningGameVersion = data.gameVersion;
     launching = true;
     stoppingGame = false;
     gameRunning = false;
@@ -1035,13 +1142,14 @@ window.launcher.onLogsCleared(() => {
     settings = loadedSettings;
     clientInfo = loadedClientInfo;
     gameRunning = Boolean(gameStatus?.running);
+    runningGameVersion = gameStatus?.gameVersion || null;
     stoppingGame = false;
     fillSettings();
     renderAllAccountUI();
     if (Array.isArray(logHistory) && logHistory.length) {
       $('logOutput').textContent = logHistory.map((entry) => `[${entry.type || 'launcher'}] ${entry.line || ''}`).join('\n') + '\n';
     }
-    await refreshInstalledMods();
+    resetModsVersionSelection();
   } catch (error) {
     $('status').textContent = `Startup error: ${error.message}`;
   }

@@ -91,12 +91,47 @@
                 <span class="play-icon">▶</span>
                 <span><b>PLAY</b><small id="playSubtext">Sign in with Microsoft first</small></span>
               </button>
-              <button id="versionBtn" class="version-button" title="This build is locked to Minecraft 26.2">
-                <small>VERSION</small><b>26.2</b><span>FABRIC</span>
+              <button id="versionBtn" class="version-button" title="Choose SpectorClient version">
+                <small>VERSION</small><b id="selectedVersionLabel">26.2</b><span>FABRIC</span>
               </button>
             </div>
             <div id="status" class="launch-status">Ready.</div>
           </div>
+        </div>
+      </section>
+
+      <section id="view-versions" class="view scroll-view">
+        <div class="section-head">
+          <div>
+            <div class="overline">CLIENT VERSION</div>
+            <h2>Select SpectorClient</h2>
+            <p>Choose which Minecraft version SpectorClient should launch. Each version keeps its mods separate.</p>
+          </div>
+          <button id="versionBackBtn" class="secondary-btn">Back</button>
+        </div>
+
+        <div class="version-select-grid">
+          <button class="client-version-card" data-game-version="26.2">
+            <div class="client-version-icon">26</div>
+            <div class="client-version-copy">
+              <span class="version-card-kicker">SPECTORCLIENT</span>
+              <h3>26.2</h3>
+              <p>Fabric • Existing SpectorClient instance</p>
+              <code>%APPDATA%\spectorclient\mods</code>
+            </div>
+            <span class="version-card-action">Select →</span>
+          </button>
+
+          <button class="client-version-card" data-game-version="1.21.11">
+            <div class="client-version-icon">1.21</div>
+            <div class="client-version-copy">
+              <span class="version-card-kicker">SPECTORCLIENT</span>
+              <h3>1.21.11</h3>
+              <p>Fabric • Separate instance and mods</p>
+              <code>%APPDATA%\spectorclient\instances\1.21.11\mods</code>
+            </div>
+            <span class="version-card-action">Select →</span>
+          </button>
         </div>
       </section>
 
@@ -105,41 +140,66 @@
           <div>
             <div class="overline">MOD MANAGER</div>
             <h2>Mods</h2>
-            <p>Installed mods live in <code>%APPDATA%\spectorclient\mods</code>. Search Modrinth below for Fabric 26.2 mods.</p>
+            <p id="modsDescription">Select a SpectorClient version first. Each version has its own mods folder and Modrinth library.</p>
           </div>
-          <button id="openModsFolderBtn" class="secondary-btn">Open mods folder</button>
+          <button id="openModsFolderBtn" class="secondary-btn" disabled>Open mods folder</button>
         </div>
 
-        <div class="mod-tabs" role="tablist" aria-label="Mod manager sections">
-          <button id="installModsTab" class="mod-tab active" data-mod-tab="install" role="tab" aria-selected="true">Install Mods</button>
-          <button id="installedModsTab" class="mod-tab" data-mod-tab="installed" role="tab" aria-selected="false">Installed <span id="installedTabCount">0</span></button>
+        <div id="modVersionChooser" class="mod-version-chooser">
+          <div class="mod-version-heading">
+            <span class="version-card-kicker">CHOOSE VERSION</span>
+            <h3>Which SpectorClient mods do you want to manage?</h3>
+            <p>Mods installed for one version never appear in the other version.</p>
+          </div>
+          <div class="mod-version-grid">
+            <button class="mod-version-card" data-mod-game-version="26.2">
+              <b>SpectorClient 26.2</b>
+              <span>Fabric • %APPDATA%\spectorclient\mods</span>
+            </button>
+            <button class="mod-version-card" data-mod-game-version="1.21.11">
+              <b>SpectorClient 1.21.11</b>
+              <span>Fabric • Separate 1.21.11 mods folder</span>
+            </button>
+          </div>
         </div>
-        <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
 
-        <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
-          <div class="mods-toolbar">
-            <div class="search-box">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
-              <input id="modSearchInput" maxlength="100" placeholder="Search Modrinth for Fabric 26.2 mods..." />
-              <button id="modSearchBtn" class="accent-btn">Search</button>
+        <div id="modManagerContent" class="hidden">
+          <div class="mod-selected-version-row">
+            <div><small>MANAGING</small><b id="modSelectedVersionLabel">SpectorClient 26.2</b></div>
+            <button id="changeModVersionBtn" class="text-btn">Change version</button>
+          </div>
+
+          <div class="mod-tabs" role="tablist" aria-label="Mod manager sections">
+            <button id="installModsTab" class="mod-tab active" data-mod-tab="install" role="tab" aria-selected="true">Install Mods</button>
+            <button id="installedModsTab" class="mod-tab" data-mod-tab="installed" role="tab" aria-selected="false">Installed <span id="installedTabCount">0</span></button>
+          </div>
+          <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
+
+          <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
+            <div class="mods-toolbar">
+              <div class="search-box">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+                <input id="modSearchInput" maxlength="100" placeholder="Select a version first..." />
+                <button id="modSearchBtn" class="accent-btn">Search</button>
+              </div>
             </div>
+
+            <div class="mod-section-title browser-title">
+              <div><h3>Browse Modrinth</h3><span id="modBrowseSubtitle">Fabric-compatible mods</span></div>
+            </div>
+            <div id="modSearchResults" class="mod-results">
+              <div class="empty-state compact-empty"><b>Select a version</b><span>Choose 26.2 or 1.21.11 to browse compatible mods.</span></div>
+            </div>
+            <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
           </div>
 
-          <div class="mod-section-title browser-title">
-            <div><h3>Browse Modrinth</h3><span>Only Fabric + Minecraft 26.2 results</span></div>
+          <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed">
+            <div class="mod-section-title installed-tab-title">
+              <div><h3>Installed Mods</h3><span id="installedCount">0 mods</span></div>
+              <button id="refreshModsBtn" class="text-btn">Refresh</button>
+            </div>
+            <div id="installedMods" class="installed-list"></div>
           </div>
-          <div id="modSearchResults" class="mod-results">
-            <div class="empty-state compact-empty"><b>Search for a mod</b><span>Try Sodium, Iris, Mod Menu, or any other Fabric mod.</span></div>
-          </div>
-          <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
-        </div>
-
-        <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed">
-          <div class="mod-section-title installed-tab-title">
-            <div><h3>Installed Mods</h3><span id="installedCount">0 mods</span></div>
-            <button id="refreshModsBtn" class="text-btn">Refresh</button>
-          </div>
-          <div id="installedMods" class="installed-list"></div>
         </div>
       </section>
 
@@ -160,7 +220,7 @@
           <div>
             <div class="overline">CLIENT CONFIGURATION</div>
             <h2>Settings</h2>
-            <p>The game directory and version are fixed for this SpectorClient build.</p>
+            <p>Launcher settings are shared, while the selected SpectorClient version and its mods are kept version-aware.</p>
           </div>
           <button id="saveSettingsBtn" class="accent-btn">Save settings</button>
         </div>
@@ -259,7 +319,7 @@
 
           <div class="setting-card">
             <h3>Fixed client stack</h3>
-            <div class="stack-row"><span>Minecraft</span><b>26.2</b></div>
+            <div class="stack-row"><span>Selected Minecraft</span><b id="settingsSelectedVersion">26.2</b></div>
             <div class="stack-row"><span>Loader</span><b>Fabric</b></div>
             <div class="stack-row"><span>Fabric API</span><b>Automatic</b></div>
           </div>
@@ -293,8 +353,8 @@
       <section class="right-panel news-panel">
         <div class="right-panel-head"><span>NEWS</span><button id="newsHomeBtn" class="mini-link">HOME</button></div>
         <div class="news-list">
-          <article><span class="news-tag">CLIENT</span><h3>SpectorClient 26.2</h3><p>Dedicated Fabric instance, Microsoft login and automatic client setup.</p></article>
-          <article><span class="news-tag">NEW</span><h3>Modrinth browser</h3><p>Search and install Fabric 26.2 mods directly into the SpectorClient mods folder.</p></article>
+          <article><span class="news-tag">CLIENT</span><h3>Multiple client versions</h3><p>Launch SpectorClient 26.2 or SpectorClient 1.21.11 with isolated mods.</p></article>
+          <article><span class="news-tag">NEW</span><h3>Version-aware Modrinth</h3><p>Choose a client version before browsing or managing compatible Fabric mods.</p></article>
           <article><span class="news-tag">FILES</span><h3>Separate instance</h3><p>Your normal <code>.minecraft</code> folder stays untouched.</p></article>
         </div>
       </section>

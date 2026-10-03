@@ -18,8 +18,11 @@ if (!hasSingleInstanceLock) {
 }
 
 const PRODUCT_NAME = 'SpectorClient';
-const GAME_VERSION = '26.2';
-const SPECTOR_MOD_URL = 'https://spectorclient.com/mod/download';
+const DEFAULT_GAME_VERSION = '26.2';
+const CLIENT_PROFILES = Object.freeze({
+  '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download' },
+  '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11' }
+});
 const SPECTOR_MOD_FILENAME = 'spectorclient.jar';
 const LEGACY_SPECTOR_MOD_FILENAMES = ['spectorclient-1.0.0.jar'];
 const BRAND_IMAGE_URL = 'https://i.imgur.com/nP9aVFe.png';
@@ -46,11 +49,12 @@ let logWindow;
 const logBuffer = [];
 const MAX_LOG_LINES = 2500;
 let activeGameProcess = null;
+let activeGameVersion = null;
 let launcherEventsBound = false;
 let preferredUiScale = 1;
 let effectiveUiScale = 1;
 let scaleResizeTimer = null;
-let fabricApiRefreshPromise = null;
+const fabricApiRefreshPromises = new Map();
 let javaInstallPromise = null;
 let updaterInitialized = false;
 let updaterInterval = null;
@@ -76,9 +80,43 @@ const launcher = new Client();
 const p = (...parts) => path.join(APPDATA_ROOT, ...parts);
 const launcherDataPath = (...parts) => path.join(LAUNCHER_DATA, ...parts);
 
+function normalizeGameVersion(value) {
+  const candidate = String(value || '').trim();
+  return Object.prototype.hasOwnProperty.call(CLIENT_PROFILES, candidate) ? candidate : DEFAULT_GAME_VERSION;
+}
+
+function getClientProfile(value) {
+  const gameVersion = normalizeGameVersion(value);
+  return { gameVersion, ...CLIENT_PROFILES[gameVersion] };
+}
+
+function getInstanceRoot(value) {
+  const gameVersion = normalizeGameVersion(value);
+  // Keep 26.2 on the original root so existing users retain their mods/configs.
+  return gameVersion === DEFAULT_GAME_VERSION
+    ? APPDATA_ROOT
+    : path.join(APPDATA_ROOT, 'instances', gameVersion);
+}
+
+function getModsDir(value) {
+  return path.join(getInstanceRoot(value), 'mods');
+}
+
+function instancePath(value, ...parts) {
+  return path.join(getInstanceRoot(value), ...parts);
+}
+
+function getModRegistryPath(value) {
+  const gameVersion = normalizeGameVersion(value);
+  return gameVersion === DEFAULT_GAME_VERSION
+    ? launcherDataPath('mods-registry.json')
+    : launcherDataPath(`mods-registry-${gameVersion}.json`);
+}
+
 function defaultSettings() {
   return {
     selectedAccountId: null,
+    selectedGameVersion: DEFAULT_GAME_VERSION,
     minRamGb: 4,
     maxRamGb: 6,
     javaPath: '',
@@ -98,17 +136,22 @@ function defaultSettings() {
 }
 
 async function ensureDirs() {
+  const versionRoots = Object.keys(CLIENT_PROFILES).map((gameVersion) => getInstanceRoot(gameVersion));
+  const versionDirs = versionRoots.flatMap((root) => [
+    fsp.mkdir(root, { recursive: true }),
+    fsp.mkdir(path.join(root, 'mods'), { recursive: true }),
+    fsp.mkdir(path.join(root, 'versions'), { recursive: true })
+  ]);
   await Promise.all([
     fsp.mkdir(APPDATA_ROOT, { recursive: true }),
     fsp.mkdir(LAUNCHER_DATA, { recursive: true }),
     fsp.mkdir(launcherDataPath('accounts'), { recursive: true }),
-    fsp.mkdir(p('mods'), { recursive: true }),
-    fsp.mkdir(p('versions'), { recursive: true }),
+    fsp.mkdir(path.join(APPDATA_ROOT, 'instances'), { recursive: true }),
     fsp.mkdir(path.join(APPDATA_ROOT, 'runtime'), { recursive: true }),
-    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true })
+    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true }),
+    ...versionDirs
   ]);
 }
-
 
 function temurinArch() {
   if (process.arch === 'x64') return 'x64';
@@ -324,6 +367,7 @@ async function loadSettings() {
     return {
       ...defaultSettings(),
       ...parsed,
+      selectedGameVersion: normalizeGameVersion(parsed.selectedGameVersion),
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : []
     };
   } catch {
@@ -333,7 +377,7 @@ async function loadSettings() {
 
 async function saveSettings(settings) {
   const safe = { ...defaultSettings(), ...settings };
-  // The game directory and game version are intentionally fixed in this build.
+  safe.selectedGameVersion = normalizeGameVersion(safe.selectedGameVersion);
   delete safe.gameDirectory;
   delete safe.clientId;
   delete safe.selectedVersion;
@@ -1028,8 +1072,8 @@ async function downloadFile(url, destination, label, { silent = false } = {}) {
   });
 }
 
-async function removeMatchingMods(prefix, keepPath) {
-  const modsDir = p('mods');
+async function removeMatchingMods(gameVersion, prefix, keepPath) {
+  const modsDir = getModsDir(gameVersion);
   const names = await fsp.readdir(modsDir).catch(() => []);
   for (const name of names) {
     if (name.toLowerCase().startsWith(prefix.toLowerCase()) && name.toLowerCase().endsWith('.jar')) {
@@ -1039,55 +1083,51 @@ async function removeMatchingMods(prefix, keepPath) {
   }
 }
 
-async function ensureFabricProfile() {
-  send('install-state', { step: 'Fabric Loader', text: 'Checking Fabric Loader…' });
-  const loaders = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(GAME_VERSION)}`);
-  if (!Array.isArray(loaders) || !loaders.length) throw new Error(`Fabric Loader does not currently list Minecraft ${GAME_VERSION}.`);
+async function ensureFabricProfile(gameVersion) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  send('install-state', { step: 'Fabric Loader', text: `Checking Fabric Loader for ${selectedVersion}…`, gameVersion: selectedVersion });
+  const loaders = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(selectedVersion)}`);
+  if (!Array.isArray(loaders) || !loaders.length) throw new Error(`Fabric Loader does not currently list Minecraft ${selectedVersion}.`);
 
   const selected = loaders.find((x) => x?.loader?.stable) || loaders[0];
   const loaderVersion = selected?.loader?.version;
   if (!loaderVersion) throw new Error('Could not determine a Fabric Loader version.');
 
-  const profile = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(GAME_VERSION)}/${encodeURIComponent(loaderVersion)}/profile/json`);
-  const versionId = profile?.id || `fabric-loader-${loaderVersion}-${GAME_VERSION}`;
-  const versionDir = p('versions', versionId);
+  const profile = await request(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(selectedVersion)}/${encodeURIComponent(loaderVersion)}/profile/json`);
+  const versionId = profile?.id || `fabric-loader-${loaderVersion}-${selectedVersion}`;
+  const versionDir = instancePath(selectedVersion, 'versions', versionId);
   const versionJson = path.join(versionDir, `${versionId}.json`);
   await fsp.mkdir(versionDir, { recursive: true });
   await fsp.writeFile(versionJson, JSON.stringify(profile, null, 2));
-  log(`Fabric Loader ${loaderVersion} profile prepared (${versionId}).`);
-  return { loaderVersion, versionId };
+  log(`Fabric Loader ${loaderVersion} profile prepared for ${selectedVersion} (${versionId}).`);
+  return { loaderVersion, versionId, gameVersion: selectedVersion };
 }
 
-async function ensureFabricApi({ silent = false } = {}) {
-  // Deduplicate startup/play/mod-manager checks so two callers cannot race while
-  // replacing the same Fabric API JAR.
-  if (fabricApiRefreshPromise) return fabricApiRefreshPromise;
+async function ensureFabricApi(gameVersion, { silent = false } = {}) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  if (fabricApiRefreshPromises.has(selectedVersion)) return fabricApiRefreshPromises.get(selectedVersion);
 
-  fabricApiRefreshPromise = (async () => {
-    if (!silent) send('install-state', { step: 'Fabric API', text: 'Checking Fabric API…' });
+  const refreshPromise = (async () => {
+    if (!silent) send('install-state', { step: 'Fabric API', text: `Checking Fabric API for ${selectedVersion}…`, gameVersion: selectedVersion });
     const params = new URLSearchParams({
       loaders: JSON.stringify(['fabric']),
-      game_versions: JSON.stringify([GAME_VERSION]),
+      game_versions: JSON.stringify([selectedVersion]),
       include_changelog: 'false'
     });
     const versions = await request(`${MODRINTH_API}/project/${FABRIC_API_PROJECT}/version?${params.toString()}`);
-    if (!Array.isArray(versions) || !versions.length) throw new Error(`No Fabric API build was found for Minecraft ${GAME_VERSION}.`);
+    if (!Array.isArray(versions) || !versions.length) throw new Error(`No Fabric API build was found for Minecraft ${selectedVersion}.`);
 
-    // "Latest" means the newest compatible Fabric API build Modrinth currently
-    // returns for Fabric + Minecraft 26.2, regardless of what was installed before.
     const sorted = [...versions].sort((a, b) => new Date(b.date_published || 0) - new Date(a.date_published || 0));
     const version = sorted[0];
     const file = version.files?.find((f) => f.primary && f.filename?.endsWith('.jar')) || version.files?.find((f) => f.filename?.endsWith('.jar'));
     if (!file?.url) throw new Error('Fabric API metadata did not contain a downloadable JAR.');
 
     const filename = path.basename(file.filename || `fabric-api-${version.version_number}.jar`);
-    const destination = p('mods', filename);
-    const registry = await loadModRegistry();
+    const destination = path.join(getModsDir(selectedVersion), filename);
+    const registry = await loadModRegistry(selectedVersion);
     const previous = registry[FABRIC_API_PROJECT] || null;
 
-    // Remove old Fabric API JAR names, but keep the destination if the newest
-    // build uses the same filename so it can be verified before redownloading.
-    await removeMatchingMods('fabric-api-', destination);
+    await removeMatchingMods(selectedVersion, 'fabric-api-', destination);
 
     let alreadyLatest = false;
     try {
@@ -1100,7 +1140,7 @@ async function ensureFabricApi({ silent = false } = {}) {
     if (!alreadyLatest) {
       await downloadFile(file.url, destination, `Fabric API ${version.version_number}`, { silent });
     } else {
-      log(`Fabric API already on latest compatible build: ${version.version_number}`);
+      log(`Fabric API already on latest compatible build for ${selectedVersion}: ${version.version_number}`);
     }
 
     registry[FABRIC_API_PROJECT] = {
@@ -1115,59 +1155,63 @@ async function ensureFabricApi({ silent = false } = {}) {
       installedAt: previous?.installedAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-    await saveModRegistry(registry);
+    await saveModRegistry(selectedVersion, registry);
 
     return { version: version.version_number, versionId: version.id, filename };
   })();
 
+  fabricApiRefreshPromises.set(selectedVersion, refreshPromise);
   try {
-    return await fabricApiRefreshPromise;
+    return await refreshPromise;
   } finally {
-    fabricApiRefreshPromise = null;
+    fabricApiRefreshPromises.delete(selectedVersion);
   }
 }
 
-async function ensureSpectorMod() {
-  const destination = p('mods', SPECTOR_MOD_FILENAME);
-  send('install-state', { step: 'SpectorClient', text: 'Refreshing SpectorClient mod…' });
+async function ensureSpectorMod(gameVersion) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const profile = getClientProfile(selectedVersion);
+  const modsDir = getModsDir(selectedVersion);
+  const destination = path.join(modsDir, SPECTOR_MOD_FILENAME);
+  send('install-state', { step: 'SpectorClient', text: `Refreshing SpectorClient ${selectedVersion} mod…`, gameVersion: selectedVersion });
 
-  // Intentionally remove ONLY SpectorClient's own fixed filenames. Never wildcard-delete user mods.
   const spectorFiles = [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES];
   for (const filename of spectorFiles) {
-    await fsp.rm(p('mods', filename), { force: true }).catch(() => {});
+    await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
   }
 
-  await downloadFile(SPECTOR_MOD_URL, destination, 'SpectorClient mod');
-  log(`SpectorClient mod refreshed from ${SPECTOR_MOD_URL}`);
+  await downloadFile(profile.modUrl, destination, `SpectorClient ${selectedVersion} mod`);
+  log(`SpectorClient ${selectedVersion} mod refreshed from ${profile.modUrl}`);
   return destination;
 }
 
-async function prepareClient() {
+async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   await ensureDirs();
-  send('install-state', { step: 'Preparing', text: `Preparing SpectorClient for Minecraft ${GAME_VERSION}…`, percent: 0 });
-  const fabric = await ensureFabricProfile();
-  const api = await ensureFabricApi();
-  await ensureSpectorMod();
-  send('install-state', { step: 'Ready', text: 'Client ready.', percent: 100 });
-  return { ...fabric, fabricApiVersion: api.version };
+  send('install-state', { step: 'Preparing', text: `Preparing SpectorClient for Minecraft ${selectedVersion}…`, percent: 0, gameVersion: selectedVersion });
+  const fabric = await ensureFabricProfile(selectedVersion);
+  const api = await ensureFabricApi(selectedVersion);
+  await ensureSpectorMod(selectedVersion);
+  send('install-state', { step: 'Ready', text: `SpectorClient ${selectedVersion} ready.`, percent: 100, gameVersion: selectedVersion });
+  return { ...fabric, fabricApiVersion: api.version, root: getInstanceRoot(selectedVersion) };
 }
 
 // ---------------------------
 // Modrinth mod manager
 // ---------------------------
 
-async function loadModRegistry() {
+async function loadModRegistry(gameVersion = DEFAULT_GAME_VERSION) {
   await ensureDirs();
   try {
-    const data = JSON.parse(await fsp.readFile(launcherDataPath('mods-registry.json'), 'utf8'));
+    const data = JSON.parse(await fsp.readFile(getModRegistryPath(gameVersion), 'utf8'));
     return data && typeof data === 'object' ? data : {};
   } catch {
     return {};
   }
 }
 
-async function saveModRegistry(registry) {
-  await fsp.writeFile(launcherDataPath('mods-registry.json'), JSON.stringify(registry, null, 2));
+async function saveModRegistry(gameVersion, registry) {
+  await fsp.writeFile(getModRegistryPath(gameVersion), JSON.stringify(registry, null, 2));
 }
 
 function isCoreModFilename(filename) {
@@ -1175,15 +1219,17 @@ function isCoreModFilename(filename) {
   return lower.startsWith('fabric-api-') || lower === SPECTOR_MOD_FILENAME.toLowerCase() || LEGACY_SPECTOR_MOD_FILENAMES.map((name) => name.toLowerCase()).includes(lower);
 }
 
-async function listInstalledMods() {
+async function listInstalledMods(gameVersion = DEFAULT_GAME_VERSION) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   await ensureDirs();
-  const registry = await loadModRegistry();
-  const entries = await fsp.readdir(p('mods'), { withFileTypes: true }).catch(() => []);
+  const registry = await loadModRegistry(selectedVersion);
+  const modsDir = getModsDir(selectedVersion);
+  const entries = await fsp.readdir(modsDir, { withFileTypes: true }).catch(() => []);
   const files = [];
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.jar')) continue;
-    const stat = await fsp.stat(p('mods', entry.name)).catch(() => null);
+    const stat = await fsp.stat(path.join(modsDir, entry.name)).catch(() => null);
     if (!stat) continue;
     const registered = Object.values(registry).find((item) => item?.filename === entry.name) || null;
     files.push({
@@ -1196,7 +1242,8 @@ async function listInstalledMods() {
       versionNumber: registered?.versionNumber || '',
       versionId: registered?.versionId || '',
       iconUrl: registered?.iconUrl || '',
-      dependency: Boolean(registered?.dependency)
+      dependency: Boolean(registered?.dependency),
+      gameVersion: selectedVersion
     });
   }
 
@@ -1204,14 +1251,15 @@ async function listInstalledMods() {
   return files;
 }
 
-async function searchModrinthMods(query, page = 1) {
+async function searchModrinthMods(gameVersion, query, page = 1) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   const q = String(query || '').trim().slice(0, 100);
   const safePage = Math.max(1, Math.min(10000, Number.parseInt(page, 10) || 1));
   const offset = (safePage - 1) * MODRINTH_PAGE_SIZE;
   const facets = [
     ['project_type:mod'],
     ['categories:fabric'],
-    [`versions:${GAME_VERSION}`],
+    [`versions:${selectedVersion}`],
     [
       'environment:client_and_server',
       'environment:client_only',
@@ -1233,6 +1281,7 @@ async function searchModrinthMods(query, page = 1) {
   const total = Math.max(0, Number(data?.total_hits ?? (offset + hits.length)) || 0);
   const totalPages = Math.max(1, Math.ceil(total / MODRINTH_PAGE_SIZE));
   return {
+    gameVersion: selectedVersion,
     items: hits.map((hit) => ({
       projectId: hit.project_id,
       slug: hit.slug || '',
@@ -1250,29 +1299,28 @@ async function searchModrinthMods(query, page = 1) {
   };
 }
 
-async function getCompatibleProjectVersion(projectId, preferRelease = true) {
+async function getCompatibleProjectVersion(gameVersion, projectId, preferRelease = true) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   const params = new URLSearchParams({
     loaders: JSON.stringify(['fabric']),
-    game_versions: JSON.stringify([GAME_VERSION]),
+    game_versions: JSON.stringify([selectedVersion]),
     include_changelog: 'false'
   });
   const versions = await request(`${MODRINTH_API}/project/${encodeURIComponent(projectId)}/version?${params.toString()}`);
   if (!Array.isArray(versions) || !versions.length) {
-    throw new Error(`No Fabric ${GAME_VERSION} version is available for this mod.`);
+    throw new Error(`No Fabric ${selectedVersion} version is available for this mod.`);
   }
   const sorted = [...versions].sort((a, b) => new Date(b.date_published || 0) - new Date(a.date_published || 0));
   return preferRelease ? (sorted.find((v) => v.version_type === 'release') || sorted[0]) : sorted[0];
 }
 
-async function getModrinthProjectStatuses(projectIds) {
+async function getModrinthProjectStatuses(gameVersion, projectIds) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   const ids = [...new Set((Array.isArray(projectIds) ? projectIds : [])
     .map((id) => String(id || '').trim())
     .filter((id) => /^[A-Za-z0-9_-]{2,80}$/.test(id)))].slice(0, 60);
-  const registry = await loadModRegistry();
+  const registry = await loadModRegistry(selectedVersion);
   const statuses = {};
-
-  // Resolve in small batches so a page of Modrinth results does not create a
-  // large burst of simultaneous API requests.
   const concurrency = 6;
   let cursor = 0;
   async function worker() {
@@ -1280,7 +1328,7 @@ async function getModrinthProjectStatuses(projectIds) {
       const id = ids[cursor++];
       const installed = registry[id] || null;
       try {
-        const latest = await getCompatibleProjectVersion(id, id !== FABRIC_API_PROJECT);
+        const latest = await getCompatibleProjectVersion(selectedVersion, id, id !== FABRIC_API_PROJECT);
         statuses[id] = {
           projectId: id,
           installed: Boolean(installed),
@@ -1315,50 +1363,48 @@ function pickVersionJar(version) {
     || files.find((f) => String(f.filename).toLowerCase().endsWith('.jar'));
 }
 
-async function resolveRequiredDependencyVersion(dep) {
+async function resolveRequiredDependencyVersion(gameVersion, dep) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   if (dep?.version_id) {
     const exact = await request(`${MODRINTH_API}/version/${encodeURIComponent(dep.version_id)}`);
     const exactLoaders = Array.isArray(exact?.loaders) ? exact.loaders : [];
     const exactGameVersions = Array.isArray(exact?.game_versions) ? exact.game_versions : [];
     const exactCompatible = (!exactLoaders.length || exactLoaders.includes('fabric'))
-      && (!exactGameVersions.length || exactGameVersions.includes(GAME_VERSION));
+      && (!exactGameVersions.length || exactGameVersions.includes(selectedVersion));
     if (exactCompatible) return exact;
-    // Some projects pin an old dependency version. If the dependency project ID is
-    // also available, prefer a current Fabric + 26.2-compatible build instead of
-    // leaving the dependency missing.
-    if (dep.project_id) return getCompatibleProjectVersion(dep.project_id);
-    throw new Error(`Pinned dependency version is not compatible with Fabric ${GAME_VERSION}.`);
+    if (dep.project_id) return getCompatibleProjectVersion(selectedVersion, dep.project_id);
+    throw new Error(`Pinned dependency version is not compatible with Fabric ${selectedVersion}.`);
   }
-  if (dep?.project_id) return getCompatibleProjectVersion(dep.project_id);
+  if (dep?.project_id) return getCompatibleProjectVersion(selectedVersion, dep.project_id);
   if (dep?.file_name) {
     throw new Error(`Required dependency ${dep.file_name} has no Modrinth project/version ID and cannot be downloaded automatically.`);
   }
   throw new Error('A required dependency is missing its Modrinth project/version ID.');
 }
 
-async function installModrinthVersion(version, { dependency = false, visited = new Set() } = {}) {
+async function installModrinthVersion(gameVersion, version, { dependency = false, visited = new Set() } = {}) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   if (!version?.id) throw new Error('Invalid Modrinth version metadata.');
   if (visited.has(version.id)) return null;
   visited.add(version.id);
 
   const loaders = Array.isArray(version.loaders) ? version.loaders : [];
   const gameVersions = Array.isArray(version.game_versions) ? version.game_versions : [];
-  if (loaders.length && !loaders.includes('fabric')) throw new Error(`A required dependency is not available for Fabric.`);
-  if (gameVersions.length && !gameVersions.includes(GAME_VERSION)) throw new Error(`A required dependency is not compatible with Minecraft ${GAME_VERSION}.`);
+  if (loaders.length && !loaders.includes('fabric')) throw new Error('A required dependency is not available for Fabric.');
+  if (gameVersions.length && !gameVersions.includes(selectedVersion)) throw new Error(`A required dependency is not compatible with Minecraft ${selectedVersion}.`);
 
-  // Every install/update recursively installs Modrinth-declared REQUIRED dependencies first.
-  // Dependencies can have their own dependencies, so the same routine is used recursively.
   const requiredDependencies = (version.dependencies || []).filter((d) => d.dependency_type === 'required');
   for (const dep of requiredDependencies) {
     try {
-      const depVersion = await resolveRequiredDependencyVersion(dep);
+      const depVersion = await resolveRequiredDependencyVersion(selectedVersion, dep);
       send('mod-install-state', {
         state: 'dependency',
         projectId: version.project_id,
         dependencyProjectId: depVersion?.project_id || dep.project_id || '',
-        text: 'Installing required dependency…'
+        gameVersion: selectedVersion,
+        text: `Installing required dependency for ${selectedVersion}…`
       });
-      await installModrinthVersion(depVersion, { dependency: true, visited });
+      await installModrinthVersion(selectedVersion, depVersion, { dependency: true, visited });
     } catch (error) {
       throw new Error(`Could not install a required dependency: ${error.message}`);
     }
@@ -1366,35 +1412,33 @@ async function installModrinthVersion(version, { dependency = false, visited = n
 
   const project = await request(`${MODRINTH_API}/project/${encodeURIComponent(version.project_id)}`);
   if (project?.slug === FABRIC_API_PROJECT) {
-    await ensureFabricApi();
+    await ensureFabricApi(selectedVersion);
     return { title: project.title || 'Fabric API', core: true };
   }
 
   const file = pickVersionJar(version);
   if (!file?.url || !file?.filename) throw new Error('This Modrinth version does not contain an installable JAR.');
   const filename = path.basename(file.filename);
-  const destination = p('mods', filename);
-  const registry = await loadModRegistry();
+  const modsDir = getModsDir(selectedVersion);
+  const destination = path.join(modsDir, filename);
+  const registry = await loadModRegistry(selectedVersion);
   const registryKey = String(version.project_id);
   const previous = registry[registryKey];
 
   if (previous?.filename && previous.filename !== filename && !isCoreModFilename(previous.filename)) {
-    await fsp.rm(p('mods', path.basename(previous.filename)), { force: true }).catch(() => {});
+    await fsp.rm(path.join(modsDir, path.basename(previous.filename)), { force: true }).catch(() => {});
   }
 
   let alreadyInstalled = false;
   try {
     const stat = await fsp.stat(destination);
-    // A matching file size alone is not enough to prove an update is current.
-    // Only skip the download when the registry says this exact Modrinth version
-    // is already installed and the on-disk file also looks complete.
     alreadyInstalled = previous?.versionId === version.id
       && stat.size > 0
       && (!file.size || stat.size === Number(file.size));
   } catch {}
 
   if (!alreadyInstalled) {
-    send('mod-install-state', { state: 'downloading', projectId: version.project_id, text: `Installing ${project?.title || filename}…` });
+    send('mod-install-state', { state: 'downloading', projectId: version.project_id, gameVersion: selectedVersion, text: `Installing ${project?.title || filename} for ${selectedVersion}…` });
     await downloadFile(file.url, destination, project?.title || filename);
   }
 
@@ -1409,41 +1453,41 @@ async function installModrinthVersion(version, { dependency = false, visited = n
     dependency: Boolean(dependency),
     installedAt: new Date().toISOString()
   };
-  await saveModRegistry(registry);
-  log(`${alreadyInstalled ? 'Verified' : 'Installed'} Modrinth mod: ${registry[registryKey].title} ${registry[registryKey].versionNumber}`);
+  await saveModRegistry(selectedVersion, registry);
+  log(`${alreadyInstalled ? 'Verified' : 'Installed'} ${selectedVersion} Modrinth mod: ${registry[registryKey].title} ${registry[registryKey].versionNumber}`);
   return registry[registryKey];
 }
 
-async function installModrinthProject(projectId) {
+async function installModrinthProject(gameVersion, projectId) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   const id = String(projectId || '').trim();
   if (!/^[A-Za-z0-9_-]{2,80}$/.test(id)) throw new Error('Invalid Modrinth project ID.');
-  // Keep the launcher's required Fabric API core dependency on the newest
-  // compatible build whenever the user installs or updates any mod.
-  await ensureFabricApi({ silent: true });
-  const registryBefore = await loadModRegistry();
+  await ensureFabricApi(selectedVersion, { silent: true });
+  const registryBefore = await loadModRegistry(selectedVersion);
   const previous = registryBefore[id] || null;
-  send('mod-install-state', { state: 'resolving', projectId: id, text: `Finding a Fabric ${GAME_VERSION} build and required dependencies…` });
-  const version = await getCompatibleProjectVersion(id);
-  const installed = await installModrinthVersion(version, { dependency: false, visited: new Set() });
+  send('mod-install-state', { state: 'resolving', projectId: id, gameVersion: selectedVersion, text: `Finding a Fabric ${selectedVersion} build and required dependencies…` });
+  const version = await getCompatibleProjectVersion(selectedVersion, id);
+  const installed = await installModrinthVersion(selectedVersion, version, { dependency: false, visited: new Set() });
   const action = previous ? (previous.versionId === version.id ? 'verified' : 'updated') : 'installed';
   const verb = action === 'updated' ? 'updated' : action === 'verified' ? 'verified' : 'installed';
-  send('mod-install-state', { state: 'complete', projectId: id, text: `${installed?.title || 'Mod'} ${verb} with required dependencies.` });
-  return { installed, action, mods: await listInstalledMods() };
+  send('mod-install-state', { state: 'complete', projectId: id, gameVersion: selectedVersion, text: `${installed?.title || 'Mod'} ${verb} for ${selectedVersion}; required dependencies checked.` });
+  return { installed, action, gameVersion: selectedVersion, mods: await listInstalledMods(selectedVersion) };
 }
 
-async function removeInstalledMod(filename) {
+async function removeInstalledMod(gameVersion, filename) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   const safeName = path.basename(String(filename || ''));
   if (!safeName.toLowerCase().endsWith('.jar') || safeName !== String(filename || '')) throw new Error('Invalid mod filename.');
   if (isCoreModFilename(safeName)) throw new Error('Fabric API and SpectorClient are required core mods and cannot be removed here.');
 
-  await fsp.rm(p('mods', safeName), { force: true });
-  const registry = await loadModRegistry();
+  await fsp.rm(path.join(getModsDir(selectedVersion), safeName), { force: true });
+  const registry = await loadModRegistry(selectedVersion);
   for (const [key, item] of Object.entries(registry)) {
     if (item?.filename === safeName) delete registry[key];
   }
-  await saveModRegistry(registry);
-  log(`Removed mod: ${safeName}`);
-  return listInstalledMods();
+  await saveModRegistry(selectedVersion, registry);
+  log(`Removed ${selectedVersion} mod: ${safeName}`);
+  return listInstalledMods(selectedVersion);
 }
 
 // ---------------------------
@@ -1532,19 +1576,19 @@ function bindLauncherEvents() {
 // IPC
 // ---------------------------
 
-ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION }));
+ipcMain.handle('settings:get', async () => ({ ...(await loadSettings()), gameDirectory: APPDATA_ROOT }));
 ipcMain.handle('settings:save', async (_event, next) => {
   const saved = await saveSettings(next);
   applyUiScale(saved.uiScale);
   pushThemeToLogWindow(saved.theme);
-  return { ...saved, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+  return { ...saved, gameDirectory: APPDATA_ROOT };
 });
 ipcMain.handle('appearance:set-theme', async (_event, theme) => {
   const normalized = normalizeLauncherTheme(theme);
   const current = await loadSettings();
   const saved = await saveSettings({ ...current, theme: normalized });
   pushThemeToLogWindow(normalized);
-  return { ...saved, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+  return { ...saved, gameDirectory: APPDATA_ROOT };
 });
 ipcMain.handle('logs:open', async (_event, theme) => {
   let normalized = normalizeLauncherTheme(theme);
@@ -1579,11 +1623,24 @@ ipcMain.handle('account:skin-data', async (_event, accountId) => {
   }
 });
 
-ipcMain.handle('client:info', async () => ({ productName: PRODUCT_NAME, gameVersion: GAME_VERSION, gameDirectory: APPDATA_ROOT, managedJavaPath: managedJavaPath(), javaMajor: JAVA_MAJOR }));
-ipcMain.handle('client:prepare', async () => prepareClient());
+ipcMain.handle('client:info', async () => ({
+  productName: PRODUCT_NAME,
+  gameDirectory: APPDATA_ROOT,
+  defaultGameVersion: DEFAULT_GAME_VERSION,
+  supportedVersions: Object.keys(CLIENT_PROFILES).map((gameVersion) => ({
+    gameVersion,
+    label: CLIENT_PROFILES[gameVersion].label,
+    modsDirectory: getModsDir(gameVersion),
+    modUrl: CLIENT_PROFILES[gameVersion].modUrl
+  })),
+  managedJavaPath: managedJavaPath(),
+  javaMajor: JAVA_MAJOR
+}));
+ipcMain.handle('client:prepare', async (_event, gameVersion) => prepareClient(gameVersion));
 ipcMain.handle('game:get-status', async () => ({
   running: Boolean(activeGameProcess && activeGameProcess.exitCode == null),
-  pid: activeGameProcess?.pid || null
+  pid: activeGameProcess?.pid || null,
+  gameVersion: activeGameVersion
 }));
 
 ipcMain.handle('window:control', async (_event, action) => {
@@ -1610,21 +1667,22 @@ ipcMain.handle('folder:open-client', async () => {
   return true;
 });
 
-ipcMain.handle('folder:open-mods', async () => {
+ipcMain.handle('folder:open-mods', async (_event, gameVersion) => {
+  const selectedVersion = normalizeGameVersion(gameVersion);
   await ensureDirs();
-  await shell.openPath(p('mods'));
+  await shell.openPath(getModsDir(selectedVersion));
   return true;
 });
 
-ipcMain.handle('mods:list', async () => {
-  // Opening/refreshing the Mods tab is also an opportunity to keep Fabric API current.
-  await ensureFabricApi({ silent: true }).catch((error) => log(`Fabric API mod-list update check failed: ${error.message}`, 'debug'));
-  return listInstalledMods();
+ipcMain.handle('mods:list', async (_event, gameVersion) => {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  await ensureFabricApi(selectedVersion, { silent: true }).catch((error) => log(`Fabric API ${selectedVersion} mod-list update check failed: ${error.message}`, 'debug'));
+  return listInstalledMods(selectedVersion);
 });
-ipcMain.handle('mods:search', async (_event, query, page) => searchModrinthMods(query, page));
-ipcMain.handle('mods:statuses', async (_event, projectIds) => getModrinthProjectStatuses(projectIds));
-ipcMain.handle('mods:install', async (_event, projectId) => installModrinthProject(projectId));
-ipcMain.handle('mods:remove', async (_event, filename) => removeInstalledMod(filename));
+ipcMain.handle('mods:search', async (_event, gameVersion, query, page) => searchModrinthMods(gameVersion, query, page));
+ipcMain.handle('mods:statuses', async (_event, gameVersion, projectIds) => getModrinthProjectStatuses(gameVersion, projectIds));
+ipcMain.handle('mods:install', async (_event, gameVersion, projectId) => installModrinthProject(gameVersion, projectId));
+ipcMain.handle('mods:remove', async (_event, gameVersion, filename) => removeInstalledMod(gameVersion, filename));
 
 ipcMain.handle('account:add', async () => {
   const settings = await loadSettings();
@@ -1665,13 +1723,14 @@ ipcMain.handle('account:remove', async (_event, accountId) => {
   if (settings.selectedAccountId === accountId) settings.selectedAccountId = settings.accounts[0]?.id || null;
   await saveSettings(settings);
   await fsp.rm(launcherDataPath('accounts', accountId), { recursive: true, force: true }).catch(() => {});
-  return { ...settings, gameDirectory: APPDATA_ROOT, gameVersion: GAME_VERSION };
+  return { ...settings, gameDirectory: APPDATA_ROOT };
 });
 
 ipcMain.handle('game:stop', async () => {
   const child = activeGameProcess;
   if (!child || child.exitCode != null) {
     activeGameProcess = null;
+    activeGameVersion = null;
     send('game-state', { state: 'stopped', text: 'SpectorClient is not running.' });
     return { ok: false, alreadyStopped: true };
   }
@@ -1713,6 +1772,8 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
   try {
     const settings = await loadSettings();
     const merged = { ...settings, ...launchInput };
+    const selectedGameVersion = normalizeGameVersion(merged.selectedGameVersion);
+    merged.selectedGameVersion = selectedGameVersion;
 
     // v1.5.7+: always open the detached Logs window at the very start of launch
     // so Java/client/auth/game output is visible without a sidebar Logs button.
@@ -1731,7 +1792,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     }
 
     send('game-state', { state: 'installing', text: 'Checking client files…' });
-    const fabric = await prepareClient();
+    const fabric = await prepareClient(selectedGameVersion);
 
     send('game-state', { state: 'authenticating', text: 'Refreshing Microsoft/Minecraft session…' });
     const session = await getMinecraftSession(account.id, false);
@@ -1739,9 +1800,9 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
 
     const opts = {
       authorization,
-      root: APPDATA_ROOT,
+      root: getInstanceRoot(selectedGameVersion),
       version: {
-        number: GAME_VERSION,
+        number: selectedGameVersion,
         type: 'release',
         custom: fabric.versionId
       },
@@ -1761,17 +1822,20 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     }
 
     bindLauncherEvents();
-    send('game-state', { state: 'launching', text: `Launching SpectorClient ${GAME_VERSION}…` });
+    send('game-state', { state: 'launching', text: `Launching SpectorClient ${selectedGameVersion}…`, gameVersion: selectedGameVersion });
 
     const child = await launcher.launch(opts);
     activeGameProcess = child;
+    activeGameVersion = selectedGameVersion;
     gameLaunchInProgress = false;
-    send('game-state', { state: 'running', text: 'SpectorClient is running.' });
+    send('game-state', { state: 'running', text: `SpectorClient ${selectedGameVersion} is running.`, gameVersion: selectedGameVersion });
     if (merged.closeLauncherOnStart && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
 
     child.once('exit', (code) => {
       activeGameProcess = null;
-      send('game-state', { state: 'stopped', text: `SpectorClient exited${code == null ? '' : ` with code ${code}`}.` });
+      const exitedVersion = activeGameVersion || selectedGameVersion;
+      activeGameVersion = null;
+      send('game-state', { state: 'stopped', text: `SpectorClient ${exitedVersion} exited${code == null ? '' : ` with code ${code}`}.`, gameVersion: exitedVersion });
 
       // If an update arrived while the user was playing, install it immediately
       // now that Java/Minecraft has fully exited.
@@ -1840,9 +1904,11 @@ app.whenReady().then(async () => {
     ensureManagedJava25().catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
   }, 450);
 
-  // Fabric API is a required SpectorClient core mod. Check it quietly every launcher start.
-  setTimeout(() => {
-    ensureFabricApi({ silent: true }).catch((error) => log(`Fabric API startup update check failed: ${error.message}`, 'debug'));
+  // Fabric API is a required core mod. Keep the currently selected client version current at startup.
+  setTimeout(async () => {
+    const startupSettings = await loadSettings();
+    const gameVersion = normalizeGameVersion(startupSettings.selectedGameVersion);
+    ensureFabricApi(gameVersion, { silent: true }).catch((error) => log(`Fabric API ${gameVersion} startup update check failed: ${error.message}`, 'debug'));
   }, 1200);
 
   app.on('activate', () => {

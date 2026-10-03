@@ -1,13 +1,13 @@
-# SpectorClient Launcher v1.6.13
+# SpectorClient Launcher v1.6.14
 
 
-## Automatic launcher updates (v1.6.13)
+## Automatic launcher updates (v1.6.14)
 
 Packaged NSIS installs check GitHub Releases about one second after startup and then every 60 seconds while no update is already pending. New releases download automatically. If Minecraft is not running, SpectorClient immediately restarts into the updater as soon as the download finishes. If Minecraft is running (or still launching), SpectorClient waits in the background and installs the downloaded update automatically the moment the game exits.
 
 `autoInstallOnAppQuit` is disabled intentionally so closing the launcher cannot install an update on top of a running Minecraft session. If an update is ready while the game is active, closing the main launcher window hides it instead so the updater can safely finish after Minecraft closes.
 
-Electron launcher for **Minecraft Java 26.2 + Fabric**, using a separate SpectorClient instance at:
+Electron launcher for **Minecraft Java 26.2 + Fabric** and **Minecraft Java 1.21.11 + Fabric**, with version-aware instances and mods:
 
 ```text
 %APPDATA%\spectorclient
@@ -18,17 +18,30 @@ Electron launcher for **Minecraft Java 26.2 + Fabric**, using a separate Spector
 
 This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`. Packaged NSIS installs check for launcher updates automatically, download newer releases in the background, and install the downloaded update when the launcher closes.
 
-The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.13`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
+The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.14`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
 
 ### One-click first publish
 
 On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication on your own PC, copies this prepared source into the repository, pushes `main`, and pushes the matching version tag so GitHub Actions creates the release. No GitHub token needs to be pasted into ChatGPT or stored in the launcher.
 
 
+
+## What changed in v1.6.14
+
+- Clicking the version button on Home now opens a dedicated SpectorClient version selector.
+- Added **SpectorClient 26.2** and **SpectorClient 1.21.11** launch targets.
+- The selected launch version is saved in launcher settings and shown on the Play screen.
+- 26.2 keeps the existing `%APPDATA%\spectorclient\mods` folder for backward compatibility.
+- 1.21.11 uses `%APPDATA%\spectorclient\instances\1.21.11\mods`.
+- The Mods page always asks which client version to manage before showing Install Mods / Installed.
+- Modrinth search, installed-state tracking, dependencies, updates, removal, Fabric API and the mods-folder button are isolated per selected version.
+- SpectorClient 26.2 downloads its core mod from `https://spectorclient.com/mod/download`.
+- SpectorClient 1.21.11 downloads its core mod from `https://spectorclient.com/mod/download/1.21.11`.
+
 ## What changed in v1.6.13
 
 - Removed the Home-screen **Check files** status row and button entirely. Client preparation still happens automatically when you press **Play**.
-- Removed the **26.2 • FABRIC** label from the top title bar. The client remains locked to Minecraft 26.2 + Fabric internally.
+- Removed the **26.2 • FABRIC** label from the top title bar. The launcher now supports selectable 26.2 and 1.21.11 Fabric clients.
 - Added **Settings → Launcher theme** with three live-preview themes:
   - **Classic** — the existing light-blue cave style
   - **Crimson** — red cave/crystal accents

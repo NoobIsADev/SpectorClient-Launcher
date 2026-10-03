@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.13",
-  "description": "SpectorClient Electron launcher for Minecraft Java 26.2 with reliable automatic updates and installer process cleanup",
+  "version": "1.6.14",
+  "description": "SpectorClient Electron launcher with selectable Minecraft 26.2 and 1.21.11 Fabric clients, isolated mods, and automatic updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
