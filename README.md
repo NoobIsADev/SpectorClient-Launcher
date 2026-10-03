@@ -1,7 +1,7 @@
-# SpectorClient Launcher v1.6.14
+# SpectorClient Launcher v1.6.15
 
 
-## Automatic launcher updates (v1.6.14)
+## Automatic launcher updates (v1.6.15)
 
 Packaged NSIS installs check GitHub Releases about one second after startup and then every 60 seconds while no update is already pending. New releases download automatically. If Minecraft is not running, SpectorClient immediately restarts into the updater as soon as the download finishes. If Minecraft is running (or still launching), SpectorClient waits in the background and installs the downloaded update automatically the moment the game exits.
 
@@ -18,7 +18,7 @@ Electron launcher for **Minecraft Java 26.2 + Fabric** and **Minecraft Java 1.21
 
 This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`. Packaged NSIS installs check for launcher updates automatically, download newer releases in the background, and install the downloaded update when the launcher closes.
 
-The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.14`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
+The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.15`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
 
 ### One-click first publish
 
@@ -26,12 +26,12 @@ On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication 
 
 
 
-## What changed in v1.6.14
+## What changed in v1.6.15
 
 - Clicking the version button on Home now opens a dedicated SpectorClient version selector.
 - Added **SpectorClient 26.2** and **SpectorClient 1.21.11** launch targets.
 - The selected launch version is saved in launcher settings and shown on the Play screen.
-- 26.2 keeps the existing `%APPDATA%\spectorclient\mods` folder for backward compatibility.
+- 26.2 now uses `%APPDATA%\spectorclient\instances\26.2\mods`; existing legacy 26.2 instance data is migrated there automatically and the old root instance files are removed after a successful move.
 - 1.21.11 uses `%APPDATA%\spectorclient\instances\1.21.11\mods`.
 - The Mods page always asks which client version to manage before showing Install Mods / Installed.
 - Modrinth search, installed-state tracking, dependencies, updates, removal, Fabric API and the mods-folder button are isolated per selected version.
@@ -159,7 +159,7 @@ Before every launch, SpectorClient prepares:
 The SpectorClient JAR is stored as:
 
 ```text
-%APPDATA%\spectorclient\mods\spectorclient.jar
+%APPDATA%\spectorclient\instances\26.2\mods\spectorclient.jar
 ```
 
 The updater only removes these SpectorClient-owned filenames:
@@ -173,10 +173,11 @@ No generic `spectorclient-*` wildcard deletion is used.
 
 ## Mods tab
 
-The Mods tab lists JARs in:
+The Mods tab manages JARs in the selected version's dedicated folder, for example:
 
 ```text
-%APPDATA%\spectorclient\mods
+%APPDATA%\spectorclient\instances\26.2\mods
+%APPDATA%\spectorclient\instances\1.21.11\mods
 ```
 
 It can search Modrinth for **Fabric + Minecraft 26.2** mods across multiple pages, install or update compatible versions, recursively install required Modrinth dependencies, remove user-installed mods, and open the mods folder. Fabric API and the SpectorClient JAR are marked as required core files.
@@ -350,3 +351,12 @@ Updater network/metadata failures are also reduced to short user-facing messages
 ## v1.6.13 updater verification fix
 
 The release workflow verifies the exact tagged updater metadata and installer URLs and polls GitHub's latest-release API directly. It no longer treats the cached `releases/latest/download` shortcut as authoritative or automatically re-drafts an otherwise valid release because that shortcut is slow to refresh.
+
+
+## v1.6.15
+
+- Moves the legacy Minecraft 26.2 instance from `%APPDATA%\spectorclient` into `%APPDATA%\spectorclient\instances\26.2` on first launch.
+- Migrates user instance files before deleting the old root copies. Launcher-global `launcher-data`, `runtime`, and `instances` folders stay in place.
+- Preserves any destination conflicts as timestamped `.pre-migration-backup-*` files instead of discarding data.
+- If the SpectorClient mod website/download cannot be reached, shows a native WARNING dialog: `We could not update the SpectorClient mod. Do you wanna continue without it?` with YES / NO.
+- YES removes any stale SpectorClient jar and launches without it. NO cancels launch and preserves the currently installed jar.

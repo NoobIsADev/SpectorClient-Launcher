@@ -219,9 +219,7 @@ function gameVersionDetails(gameVersion) {
   return clientInfo?.supportedVersions?.find((entry) => entry.gameVersion === selected) || {
     gameVersion: selected,
     label: `SpectorClient ${selected}`,
-    modsDirectory: selected === '26.2'
-      ? '%APPDATA%\\spectorclient\\mods'
-      : `%APPDATA%\\spectorclient\\instances\\${selected}\\mods`
+    modsDirectory: `%APPDATA%\\spectorclient\\instances\\${selected}\\mods`
   };
 }
 

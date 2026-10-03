@@ -92,10 +92,7 @@ function getClientProfile(value) {
 
 function getInstanceRoot(value) {
   const gameVersion = normalizeGameVersion(value);
-  // Keep 26.2 on the original root so existing users retain their mods/configs.
-  return gameVersion === DEFAULT_GAME_VERSION
-    ? APPDATA_ROOT
-    : path.join(APPDATA_ROOT, 'instances', gameVersion);
+  return path.join(APPDATA_ROOT, 'instances', gameVersion);
 }
 
 function getModsDir(value) {
@@ -135,22 +132,109 @@ function defaultSettings() {
   };
 }
 
+const LEGACY_26_2_MIGRATION_MARKER = launcherDataPath('migration-26.2-to-instances-v1.json');
+const LEGACY_26_2_EXCLUDED_ROOT_ENTRIES = new Set(['launcher-data', 'runtime', 'instances']);
+
+async function nextMigrationBackupPath(destination) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  let candidate = `${destination}.pre-migration-backup-${stamp}`;
+  let index = 1;
+  while (await pathExists(candidate)) {
+    candidate = `${destination}.pre-migration-backup-${stamp}-${index++}`;
+  }
+  return candidate;
+}
+
+async function moveLegacyEntry(source, destination) {
+  const sourceStat = await fsp.lstat(source);
+  const destinationExists = await pathExists(destination);
+
+  if (!destinationExists) {
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.rename(source, destination);
+    return;
+  }
+
+  const destinationStat = await fsp.lstat(destination);
+  if (sourceStat.isDirectory() && destinationStat.isDirectory()) {
+    await fsp.mkdir(destination, { recursive: true });
+    const children = await fsp.readdir(source);
+    for (const child of children) {
+      await moveLegacyEntry(path.join(source, child), path.join(destination, child));
+    }
+    await fsp.rmdir(source);
+    return;
+  }
+
+  // Never destroy a file that already exists in the new 26.2 instance. Keep
+  // it beside the migrated file as a timestamped backup, then move the legacy
+  // user's file into the canonical location.
+  const backup = await nextMigrationBackupPath(destination);
+  await fsp.rename(destination, backup);
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  await fsp.rename(source, destination);
+}
+
+async function migrateLegacy26_2Instance() {
+  if (await pathExists(LEGACY_26_2_MIGRATION_MARKER)) return { migrated: false, alreadyDone: true };
+
+  await fsp.mkdir(APPDATA_ROOT, { recursive: true });
+  await fsp.mkdir(LAUNCHER_DATA, { recursive: true });
+  await fsp.mkdir(path.join(APPDATA_ROOT, 'instances'), { recursive: true });
+
+  const destinationRoot = path.join(APPDATA_ROOT, 'instances', DEFAULT_GAME_VERSION);
+  await fsp.mkdir(destinationRoot, { recursive: true });
+
+  const entries = await fsp.readdir(APPDATA_ROOT, { withFileTypes: true }).catch(() => []);
+  const legacyEntries = entries.filter((entry) => !LEGACY_26_2_EXCLUDED_ROOT_ENTRIES.has(entry.name));
+  const moved = [];
+
+  if (legacyEntries.length) {
+    log(`[Migration] Moving legacy ${DEFAULT_GAME_VERSION} instance into ${destinationRoot}…`, 'launcher');
+  }
+
+  for (const entry of legacyEntries) {
+    const source = path.join(APPDATA_ROOT, entry.name);
+    const destination = path.join(destinationRoot, entry.name);
+    await moveLegacyEntry(source, destination);
+    moved.push(entry.name);
+    log(`[Migration] Moved ${entry.name} -> instances/${DEFAULT_GAME_VERSION}/${entry.name}`, 'launcher');
+  }
+
+  await fsp.writeFile(LEGACY_26_2_MIGRATION_MARKER, JSON.stringify({
+    version: 1,
+    migratedAt: new Date().toISOString(),
+    destination: destinationRoot,
+    moved
+  }, null, 2), 'utf8');
+
+  if (moved.length) {
+    log(`[Migration] Legacy ${DEFAULT_GAME_VERSION} migration complete. Old root instance files were removed after moving.`, 'launcher');
+  }
+  return { migrated: moved.length > 0, moved };
+}
+
 async function ensureDirs() {
-  const versionRoots = Object.keys(CLIENT_PROFILES).map((gameVersion) => getInstanceRoot(gameVersion));
-  const versionDirs = versionRoots.flatMap((root) => [
-    fsp.mkdir(root, { recursive: true }),
-    fsp.mkdir(path.join(root, 'mods'), { recursive: true }),
-    fsp.mkdir(path.join(root, 'versions'), { recursive: true })
-  ]);
+  // Create only launcher-global directories first. The legacy 26.2 migration
+  // must run before the new per-version instance directories are initialized.
   await Promise.all([
     fsp.mkdir(APPDATA_ROOT, { recursive: true }),
     fsp.mkdir(LAUNCHER_DATA, { recursive: true }),
     fsp.mkdir(launcherDataPath('accounts'), { recursive: true }),
     fsp.mkdir(path.join(APPDATA_ROOT, 'instances'), { recursive: true }),
     fsp.mkdir(path.join(APPDATA_ROOT, 'runtime'), { recursive: true }),
-    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true }),
-    ...versionDirs
+    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true })
   ]);
+
+  await migrateLegacy26_2Instance();
+
+  const versionRoots = Object.keys(CLIENT_PROFILES).map((gameVersion) => getInstanceRoot(gameVersion));
+  const versionDirs = versionRoots.flatMap((root) => [
+    fsp.mkdir(root, { recursive: true }),
+    fsp.mkdir(path.join(root, 'mods'), { recursive: true }),
+    fsp.mkdir(path.join(root, 'versions'), { recursive: true })
+  ]);
+  await Promise.all(versionDirs);
 }
 
 function temurinArch() {
@@ -1168,21 +1252,66 @@ async function ensureFabricApi(gameVersion, { silent = false } = {}) {
   }
 }
 
+async function askContinueWithoutSpectorMod(gameVersion, error) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  log(`[SpectorClient ${selectedVersion}] Mod update failed: ${error?.message || error}`, 'warn');
+
+  const result = await dialog.showMessageBox(mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined, {
+    type: 'warning',
+    title: 'WARNING',
+    message: 'WARNING',
+    detail: 'We could not update the SpectorClient mod.\nDo you wanna continue without it?',
+    buttons: ['YES', 'NO'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  });
+
+  return result.response === 0;
+}
+
 async function ensureSpectorMod(gameVersion) {
   const selectedVersion = normalizeGameVersion(gameVersion);
   const profile = getClientProfile(selectedVersion);
   const modsDir = getModsDir(selectedVersion);
   const destination = path.join(modsDir, SPECTOR_MOD_FILENAME);
+  const stagedDestination = path.join(modsDir, `.spectorclient-${selectedVersion}-${process.pid}-${Date.now()}.jar`);
   send('install-state', { step: 'SpectorClient', text: `Refreshing SpectorClient ${selectedVersion} mod…`, gameVersion: selectedVersion });
 
   const spectorFiles = [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES];
-  for (const filename of spectorFiles) {
-    await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
-  }
 
-  await downloadFile(profile.modUrl, destination, `SpectorClient ${selectedVersion} mod`);
-  log(`SpectorClient ${selectedVersion} mod refreshed from ${profile.modUrl}`);
-  return destination;
+  try {
+    // Download into a staging filename first so a website/network failure does
+    // not destroy the user's currently installed SpectorClient jar before they
+    // choose whether to continue.
+    await downloadFile(profile.modUrl, stagedDestination, `SpectorClient ${selectedVersion} mod`);
+
+    for (const filename of spectorFiles) {
+      await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
+    }
+    await fsp.rename(stagedDestination, destination);
+    log(`SpectorClient ${selectedVersion} mod refreshed from ${profile.modUrl}`);
+    return { path: destination, skipped: false };
+  } catch (error) {
+    await fsp.rm(stagedDestination, { force: true }).catch(() => {});
+    const continueWithout = await askContinueWithoutSpectorMod(selectedVersion, error);
+    if (!continueWithout) {
+      throw new Error(`SpectorClient ${selectedVersion} launch cancelled because the mod could not be updated.`);
+    }
+
+    // YES means genuinely continue without SpectorClient rather than silently
+    // falling back to a potentially stale/incompatible jar.
+    for (const filename of spectorFiles) {
+      await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
+    }
+    send('install-state', {
+      step: 'SpectorClient',
+      text: `Continuing Minecraft ${selectedVersion} without the SpectorClient mod.`,
+      gameVersion: selectedVersion
+    });
+    log(`[SpectorClient ${selectedVersion}] User chose YES: continuing without the SpectorClient mod.`, 'warn');
+    return { path: null, skipped: true };
+  }
 }
 
 async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
@@ -1191,9 +1320,16 @@ async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
   send('install-state', { step: 'Preparing', text: `Preparing SpectorClient for Minecraft ${selectedVersion}…`, percent: 0, gameVersion: selectedVersion });
   const fabric = await ensureFabricProfile(selectedVersion);
   const api = await ensureFabricApi(selectedVersion);
-  await ensureSpectorMod(selectedVersion);
-  send('install-state', { step: 'Ready', text: `SpectorClient ${selectedVersion} ready.`, percent: 100, gameVersion: selectedVersion });
-  return { ...fabric, fabricApiVersion: api.version, root: getInstanceRoot(selectedVersion) };
+  const spectorMod = await ensureSpectorMod(selectedVersion);
+  send('install-state', {
+    step: 'Ready',
+    text: spectorMod.skipped
+      ? `Minecraft ${selectedVersion} ready without the SpectorClient mod.`
+      : `SpectorClient ${selectedVersion} ready.`,
+    percent: 100,
+    gameVersion: selectedVersion
+  });
+  return { ...fabric, fabricApiVersion: api.version, spectorModSkipped: spectorMod.skipped, root: getInstanceRoot(selectedVersion) };
 }
 
 // ---------------------------
