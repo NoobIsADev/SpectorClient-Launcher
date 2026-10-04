@@ -20,8 +20,8 @@ if (!hasSingleInstanceLock) {
 const PRODUCT_NAME = 'SpectorClient';
 const DEFAULT_GAME_VERSION = '26.2';
 const CLIENT_PROFILES = Object.freeze({
-  '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download' },
-  '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11' }
+  '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download', javaMajor: 25 },
+  '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11', javaMajor: 21 }
 });
 const SPECTOR_MOD_FILENAME = 'spectorclient.jar';
 const LEGACY_SPECTOR_MOD_FILENAMES = ['spectorclient-1.0.0.jar'];
@@ -31,7 +31,6 @@ const FABRIC_API_PROJECT = 'fabric-api';
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 const USER_AGENT = `SpectorClient/${app.getVersion()} (Electron Minecraft launcher)`;
 const MODRINTH_PAGE_SIZE = 24;
-const JAVA_MAJOR = 25;
 const UPDATE_REPO_OWNER = 'NoobIsADev';
 const UPDATE_REPO_NAME = 'SpectorClient-Launcher';
 
@@ -41,7 +40,6 @@ const APPDATA_ROOT = process.env.APPDATA
   : path.join(app.getPath('appData'), 'spectorclient');
 const LAUNCHER_DATA = path.join(APPDATA_ROOT, 'launcher-data');
 app.setPath('userData', LAUNCHER_DATA);
-const JAVA_RUNTIME_DIR = path.join(APPDATA_ROOT, 'runtime', 'java-25');
 const JAVA_RUNTIME_DOWNLOAD_DIR = path.join(LAUNCHER_DATA, 'downloads');
 
 let mainWindow;
@@ -55,7 +53,7 @@ let preferredUiScale = 1;
 let effectiveUiScale = 1;
 let scaleResizeTimer = null;
 const fabricApiRefreshPromises = new Map();
-let javaInstallPromise = null;
+const javaInstallPromises = new Map();
 let updaterInitialized = false;
 let updaterInterval = null;
 let updaterCheckPromise = null;
@@ -116,7 +114,8 @@ function defaultSettings() {
     selectedGameVersion: DEFAULT_GAME_VERSION,
     minRamGb: 4,
     maxRamGb: 6,
-    javaPath: '',
+    java25Path: '',
+    java21Path: '',
     width: 1280,
     height: 720,
     fullscreen: false,
@@ -240,17 +239,22 @@ async function ensureDirs() {
 function temurinArch() {
   if (process.arch === 'x64') return 'x64';
   if (process.arch === 'arm64') return 'aarch64';
-  throw new Error(`Automatic Java 25 installation does not support Windows ${process.arch}.`);
+  throw new Error(`Automatic Java installation does not support Windows ${process.arch}.`);
 }
 
-function managedJavaPath() {
-  if (process.platform === 'win32') return path.join(JAVA_RUNTIME_DIR, 'bin', 'javaw.exe');
-  return path.join(JAVA_RUNTIME_DIR, 'bin', 'java');
+function javaRuntimeDir(major) {
+  return path.join(APPDATA_ROOT, 'runtime', `java-${major}`);
 }
 
-function managedJavaConsolePath() {
-  if (process.platform === 'win32') return path.join(JAVA_RUNTIME_DIR, 'bin', 'java.exe');
-  return managedJavaPath();
+function managedJavaPath(major) {
+  // Use java.exe on Windows instead of javaw.exe so JVM startup failures are
+  // captured by the launcher logs instead of appearing only as a GUI popup.
+  const executable = process.platform === 'win32' ? 'java.exe' : 'java';
+  return path.join(javaRuntimeDir(major), 'bin', executable);
+}
+
+function javaSettingsKey(major) {
+  return Number(major) === 21 ? 'java21Path' : 'java25Path';
 }
 
 async function pathExists(filePath) {
@@ -276,15 +280,96 @@ function execFilePromise(file, args, options = {}) {
   });
 }
 
-async function isJava25(javaExecutable) {
-  if (!(await pathExists(javaExecutable))) return false;
-  try {
-    const { stdout, stderr } = await execFilePromise(javaExecutable, ['-version'], { timeout: 15000 });
-    const output = `${stdout || ''}\n${stderr || ''}`;
-    return /(?:openjdk|java) version ["']25(?:[.\-+_][^"']*)?["']/i.test(output) || /version ["']25(?:\.|["'])/i.test(output);
-  } catch {
-    return false;
+function parseJavaMajor(output) {
+  const text = String(output || '');
+  const match = text.match(/(?:openjdk|java) version ["'](\d+)(?:[.\-+_][^"']*)?["']/i)
+    || text.match(/version ["'](\d+)(?:\.|["'])/i);
+  return match ? Number(match[1]) : null;
+}
+
+async function inspectJava(javaExecutable, expectedMajor) {
+  if (!(await pathExists(javaExecutable))) {
+    return { ok: false, reason: 'Java executable does not exist.' };
   }
+  try {
+    // A small heap smoke test proves the JVM can actually initialize, which
+    // catches corrupt/incomplete runtimes that may still contain java.exe.
+    const { stdout, stderr } = await execFilePromise(
+      javaExecutable,
+      ['-Xms32m', '-Xmx128m', '-version'],
+      { timeout: 20000, maxBuffer: 1024 * 1024 }
+    );
+    const output = `${stdout || ''}\n${stderr || ''}`;
+    const major = parseJavaMajor(output);
+    if (major !== Number(expectedMajor)) {
+      return { ok: false, major, output, reason: `Expected Java ${expectedMajor}, but this executable reports Java ${major ?? 'unknown'}.` };
+    }
+    return { ok: true, major, output };
+  } catch (error) {
+    const output = `${error.stdout || ''}\n${error.stderr || ''}`.trim();
+    return {
+      ok: false,
+      output,
+      reason: output || error.message || `Java ${expectedMajor} could not create a JVM.`
+    };
+  }
+}
+
+async function isJavaMajor(javaExecutable, expectedMajor) {
+  return (await inspectJava(javaExecutable, expectedMajor)).ok;
+}
+
+async function sha256File(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', reject);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+async function getTemurinPackage(major, arch, imageType) {
+  const query = new URLSearchParams({
+    architecture: arch,
+    image_type: imageType,
+    os: 'windows',
+    vendor: 'eclipse'
+  });
+  const url = `https://api.adoptium.net/v3/assets/latest/${major}/hotspot?${query.toString()}`;
+  const assets = await request(url);
+  if (!Array.isArray(assets) || !assets.length) {
+    throw new Error(`Eclipse Temurin does not currently list a Windows ${arch} Java ${major} ${imageType.toUpperCase()} package.`);
+  }
+
+  const asset = assets.find((entry) => {
+    const binary = entry?.binary;
+    return binary?.architecture === arch
+      && binary?.os === 'windows'
+      && binary?.image_type === imageType
+      && binary?.package?.link;
+  }) || assets[0];
+
+  const pkg = asset?.binary?.package;
+  if (!pkg?.link || !/^https:\/\//i.test(pkg.link)) {
+    throw new Error(`Temurin Java ${major} metadata did not contain a secure package URL.`);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(pkg.checksum || '')) {
+    throw new Error(`Temurin Java ${major} metadata did not contain a valid SHA-256 checksum.`);
+  }
+  const size = Number(pkg.size) || 0;
+  if (size < 10 * 1024 * 1024) {
+    throw new Error(`Temurin Java ${major} metadata reported an invalid package size (${size} bytes).`);
+  }
+
+  return {
+    imageType,
+    url: pkg.link,
+    checksum: String(pkg.checksum).toLowerCase(),
+    size,
+    name: pkg.name || `Temurin Java ${major}`,
+    releaseName: asset?.release_name || ''
+  };
 }
 
 function downloadJavaArchive(url, destination, { redirects = 8, onProgress = null } = {}) {
@@ -293,7 +378,8 @@ function downloadJavaArchive(url, destination, { redirects = 8, onProgress = nul
       const req = https.get(currentUrl, {
         headers: {
           'User-Agent': USER_AGENT,
-          'Accept': 'application/octet-stream,*/*;q=0.8'
+          Accept: 'application/zip,application/octet-stream,*/*;q=0.8',
+          'Cache-Control': 'no-cache'
         }
       }, (res) => {
         const status = res.statusCode || 0;
@@ -309,20 +395,40 @@ function downloadJavaArchive(url, destination, { redirects = 8, onProgress = nul
           return;
         }
 
+        const contentType = String(res.headers['content-type'] || '').toLowerCase();
+        if (contentType.includes('text/html')) {
+          res.resume();
+          reject(new Error('Java download returned an HTML page instead of a runtime archive.'));
+          return;
+        }
+
         const total = Number(res.headers['content-length']) || 0;
         let received = 0;
+        let settled = false;
         const output = fs.createWriteStream(destination);
-        output.on('error', reject);
+        const fail = (error) => {
+          if (settled) return;
+          settled = true;
+          try { output.destroy(); } catch {}
+          reject(error);
+        };
+        output.on('error', fail);
+        res.on('error', fail);
         res.on('data', (chunk) => {
           received += chunk.length;
           if (onProgress) onProgress(received, total);
         });
-        res.on('error', reject);
-        output.on('finish', () => output.close(() => resolve(destination)));
+        output.on('finish', () => {
+          output.close(() => {
+            if (settled) return;
+            settled = true;
+            resolve({ destination, received, total, contentType });
+          });
+        });
         res.pipe(output);
       });
       req.on('error', reject);
-      req.setTimeout(120000, () => req.destroy(new Error('Java download timed out.')));
+      req.setTimeout(180000, () => req.destroy(new Error('Java download timed out.')));
     };
     requestUrl(url, redirects);
   });
@@ -348,106 +454,175 @@ async function findJavaHome(root, depth = 4) {
   return null;
 }
 
-async function installManagedJava25() {
+async function extractJavaArchive(downloadPath, stagingDir) {
+  // Windows ships bsdtar on supported Windows 10/11 builds. It handles ZIPs
+  // reliably and avoids the Expand-Archive failure seen on some systems.
+  try {
+    await execFilePromise('tar.exe', ['-xf', downloadPath, '-C', stagingDir], {
+      timeout: 180000,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    return;
+  } catch (tarError) {
+    log(`[Java] tar.exe extraction failed (${tarError.message}); falling back to PowerShell Expand-Archive.`, 'debug');
+  }
+
+  // Use an encoded PowerShell command so spaces/quotes in AppData paths cannot
+  // corrupt the command line.
+  const escapePs = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  const script = `Expand-Archive -LiteralPath ${escapePs(downloadPath)} -DestinationPath ${escapePs(stagingDir)} -Force`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  await execFilePromise('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-EncodedCommand', encoded
+  ], { timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+}
+
+async function installManagedJava(major) {
+  major = Number(major);
+  if (![21, 25].includes(major)) throw new Error(`Unsupported managed Java version: ${major}`);
   if (process.platform !== 'win32') {
-    throw new Error('Automatic Java 25 installation is currently supported on Windows only. Select Java 25 manually in Settings on this platform.');
+    throw new Error(`Automatic Java ${major} installation is currently supported on Windows only. Select Java ${major} manually in Settings on this platform.`);
   }
 
   await ensureDirs();
   const arch = temurinArch();
-  const downloadPath = path.join(JAVA_RUNTIME_DOWNLOAD_DIR, `temurin-${JAVA_MAJOR}-${arch}-${process.pid}.zip`);
-  const stagingDir = path.join(APPDATA_ROOT, 'runtime', `.java-25-install-${process.pid}-${Date.now()}`);
-  const jreUrl = `https://api.adoptium.net/v3/binary/latest/${JAVA_MAJOR}/ga/windows/${arch}/jre/hotspot/normal/eclipse`;
-  const jdkUrl = `https://api.adoptium.net/v3/binary/latest/${JAVA_MAJOR}/ga/windows/${arch}/jdk/hotspot/normal/eclipse`;
+  const runtimeDir = javaRuntimeDir(major);
+  const downloadPath = path.join(JAVA_RUNTIME_DOWNLOAD_DIR, `temurin-${major}-${arch}-${process.pid}.zip`);
+  const stagingDir = path.join(APPDATA_ROOT, 'runtime', `.java-${major}-install-${process.pid}-${Date.now()}`);
 
-  log(`Installing managed Java ${JAVA_MAJOR} (${arch}) from Eclipse Temurin…`);
-  send('install-state', { step: 'Java 25', message: 'Downloading Java 25…' });
+  log(`[Java] Resolving verified Eclipse Temurin Java ${major} package for Windows ${arch}…`, 'launcher');
+  send('install-state', { step: `Java ${major}`, message: `Finding Java ${major}…` });
 
   await fsp.rm(downloadPath, { force: true }).catch(() => {});
   await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
   await fsp.mkdir(stagingDir, { recursive: true });
 
-  let lastPercent = -1;
-  const onProgress = (received, total) => {
-    if (!total) return;
-    const percent = Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
-    if (percent === lastPercent || percent % 5 !== 0) return;
-    lastPercent = percent;
-    send('install-state', { step: 'Java 25', message: `Downloading Java 25… ${percent}%`, percent });
-  };
-
+  let lastError = null;
   try {
-    try {
-      await downloadJavaArchive(jreUrl, downloadPath, { onProgress });
-    } catch (error) {
-      log(`Temurin JRE download failed (${error.message}); trying the Java 25 JDK package.`, 'debug');
-      await fsp.rm(downloadPath, { force: true }).catch(() => {});
-      await downloadJavaArchive(jdkUrl, downloadPath, { onProgress });
+    for (const imageType of ['jre', 'jdk']) {
+      let pkg;
+      try {
+        pkg = await getTemurinPackage(major, arch, imageType);
+      } catch (error) {
+        lastError = error;
+        log(`[Java] Java ${major} ${imageType.toUpperCase()} metadata unavailable: ${error.message}`, 'debug');
+        continue;
+      }
+
+      try {
+        log(`[Java] Downloading ${pkg.name} (${Math.round(pkg.size / 1024 / 1024)} MB)${pkg.releaseName ? ` from ${pkg.releaseName}` : ''}.`, 'launcher');
+        send('install-state', { step: `Java ${major}`, message: `Downloading Java ${major}… 0%`, percent: 0 });
+
+        let lastPercent = -1;
+        await downloadJavaArchive(pkg.url, downloadPath, {
+          onProgress: (received, total) => {
+            const denominator = total || pkg.size;
+            if (!denominator) return;
+            const percent = Math.max(0, Math.min(100, Math.floor((received / denominator) * 100)));
+            if (percent === lastPercent || percent % 5 !== 0) return;
+            lastPercent = percent;
+            send('install-state', { step: `Java ${major}`, message: `Downloading Java ${major}… ${percent}%`, percent });
+          }
+        });
+
+        const stat = await fsp.stat(downloadPath);
+        if (stat.size !== pkg.size) {
+          throw new Error(`Java ${major} download size mismatch: expected ${pkg.size} bytes, got ${stat.size}.`);
+        }
+
+        const actualChecksum = await sha256File(downloadPath);
+        if (actualChecksum !== pkg.checksum) {
+          throw new Error(`Java ${major} SHA-256 verification failed.`);
+        }
+
+        const fd = await fsp.open(downloadPath, 'r');
+        const header = Buffer.alloc(4);
+        await fd.read(header, 0, 4, 0);
+        await fd.close();
+        if (header[0] !== 0x50 || header[1] !== 0x4b) {
+          throw new Error(`Verified Java ${major} package is not a ZIP archive.`);
+        }
+
+        log(`[Java] Java ${major} package passed size and SHA-256 verification.`, 'launcher');
+        send('install-state', { step: `Java ${major}`, message: `Installing Java ${major}…` });
+        await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+        await fsp.mkdir(stagingDir, { recursive: true });
+        await extractJavaArchive(downloadPath, stagingDir);
+
+        const extractedHome = await findJavaHome(stagingDir);
+        if (!extractedHome) throw new Error(`Java ${major} extracted, but bin\\java.exe could not be found.`);
+
+        const extractedJava = path.join(extractedHome, 'bin', 'java.exe');
+        const inspection = await inspectJava(extractedJava, major);
+        if (!inspection.ok) {
+          throw new Error(`The downloaded Java ${major} runtime failed its JVM test: ${inspection.reason}`);
+        }
+
+        // Keep the previous runtime until the new one has been fully verified.
+        const oldRuntime = `${runtimeDir}.old-${process.pid}-${Date.now()}`;
+        if (await pathExists(runtimeDir)) await fsp.rename(runtimeDir, oldRuntime);
+        try {
+          if (path.resolve(extractedHome) === path.resolve(stagingDir)) {
+            await fsp.rename(stagingDir, runtimeDir);
+          } else {
+            await fsp.rename(extractedHome, runtimeDir);
+            await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+          }
+
+          const finalJava = managedJavaPath(major);
+          const finalInspection = await inspectJava(finalJava, major);
+          if (!finalInspection.ok) {
+            throw new Error(`Installed Java ${major} failed its final JVM test: ${finalInspection.reason}`);
+          }
+          await fsp.rm(oldRuntime, { recursive: true, force: true }).catch(() => {});
+          log(`[Java] Managed Java ${major} is ready and verified: ${finalJava}`, 'launcher');
+          send('install-state', { step: `Java ${major}`, message: `Java ${major} ready.`, percent: 100 });
+          return finalJava;
+        } catch (installError) {
+          await fsp.rm(runtimeDir, { recursive: true, force: true }).catch(() => {});
+          if (await pathExists(oldRuntime)) await fsp.rename(oldRuntime, runtimeDir).catch(() => {});
+          throw installError;
+        }
+      } catch (error) {
+        lastError = error;
+        log(`[Java] Java ${major} ${imageType.toUpperCase()} install attempt failed: ${error.message}`, 'debug');
+        await fsp.rm(downloadPath, { force: true }).catch(() => {});
+        await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+        await fsp.mkdir(stagingDir, { recursive: true }).catch(() => {});
+      }
     }
-
-    const fd = await fsp.open(downloadPath, 'r');
-    const header = Buffer.alloc(4);
-    await fd.read(header, 0, 4, 0);
-    await fd.close();
-    if (header[0] !== 0x50 || header[1] !== 0x4b) {
-      throw new Error('Downloaded Java package is not a valid ZIP archive.');
-    }
-
-    send('install-state', { step: 'Java 25', message: 'Installing Java 25…' });
-    await execFilePromise('powershell.exe', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-Command',
-      `Expand-Archive -LiteralPath ${JSON.stringify(downloadPath)} -DestinationPath ${JSON.stringify(stagingDir)} -Force`
-    ], { timeout: 180000, maxBuffer: 1024 * 1024 * 4 });
-
-    const extractedHome = await findJavaHome(stagingDir);
-    if (!extractedHome) throw new Error('Java 25 extracted, but bin\\java.exe could not be found.');
-
-    const extractedJava = path.join(extractedHome, 'bin', 'java.exe');
-    if (!(await isJava25(extractedJava))) throw new Error('The downloaded runtime did not report Java 25.');
-
-    await fsp.rm(JAVA_RUNTIME_DIR, { recursive: true, force: true }).catch(() => {});
-    if (path.resolve(extractedHome) === path.resolve(stagingDir)) {
-      await fsp.rename(stagingDir, JAVA_RUNTIME_DIR);
-    } else {
-      await fsp.rename(extractedHome, JAVA_RUNTIME_DIR);
-      await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
-    }
-
-    const launchJava = managedJavaPath();
-    const fallbackJava = managedJavaConsolePath();
-    const resolved = await pathExists(launchJava) ? launchJava : fallbackJava;
-    if (!(await pathExists(resolved))) throw new Error('Managed Java 25 installation completed without a Java executable.');
-
-    log(`Managed Java 25 is ready: ${resolved}`);
-    send('install-state', { step: 'Java 25', message: 'Java 25 ready.', percent: 100 });
-    return resolved;
+    throw lastError || new Error(`Could not install Java ${major}.`);
   } finally {
     await fsp.rm(downloadPath, { force: true }).catch(() => {});
-    if (await pathExists(stagingDir)) await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function ensureManagedJava25({ force = false } = {}) {
-  if (!force && await isJava25(managedJavaConsolePath())) {
-    const launchJava = managedJavaPath();
-    return await pathExists(launchJava) ? launchJava : managedJavaConsolePath();
+async function ensureManagedJava(major, { force = false } = {}) {
+  major = Number(major);
+  const javaExecutable = managedJavaPath(major);
+  if (!force && await isJavaMajor(javaExecutable, major)) return javaExecutable;
+
+  if (!force && await pathExists(javaRuntimeDir(major))) {
+    log(`[Java] Existing managed Java ${major} is invalid or cannot create a JVM. Reinstalling it.`, 'launcher');
   }
 
-  if (!javaInstallPromise) {
-    javaInstallPromise = installManagedJava25().finally(() => {
-      javaInstallPromise = null;
-    });
+  if (!javaInstallPromises.has(major)) {
+    javaInstallPromises.set(major, installManagedJava(major).finally(() => javaInstallPromises.delete(major)));
   }
-  return javaInstallPromise;
+  return javaInstallPromises.get(major);
 }
 
 async function loadSettings() {
   await ensureDirs();
   try {
     const parsed = JSON.parse(await fsp.readFile(launcherDataPath('settings.json'), 'utf8'));
+    // v1.6.16: the old single javaPath override belonged to the original 26.2
+    // client. Preserve it as the Java 25 override while Java 21 gets its own field.
+    if (!parsed.java25Path && parsed.javaPath) parsed.java25Path = parsed.javaPath;
     return {
       ...defaultSettings(),
       ...parsed,
@@ -466,6 +641,7 @@ async function saveSettings(settings) {
   delete safe.clientId;
   delete safe.selectedVersion;
   delete safe.versionType;
+  delete safe.javaPath; // legacy pre-v1.6.16 single Java override
   delete safe.backgroundTransparency; // v1.4.2+: launcher is always fully opaque.
   await fsp.writeFile(launcherDataPath('settings.json'), JSON.stringify(safe, null, 2));
   return safe;
@@ -1767,10 +1943,13 @@ ipcMain.handle('client:info', async () => ({
     gameVersion,
     label: CLIENT_PROFILES[gameVersion].label,
     modsDirectory: getModsDir(gameVersion),
-    modUrl: CLIENT_PROFILES[gameVersion].modUrl
+    modUrl: CLIENT_PROFILES[gameVersion].modUrl,
+    javaMajor: CLIENT_PROFILES[gameVersion].javaMajor
   })),
-  managedJavaPath: managedJavaPath(),
-  javaMajor: JAVA_MAJOR
+  managedJavaPaths: {
+    25: managedJavaPath(25),
+    21: managedJavaPath(21)
+  }
 }));
 ipcMain.handle('client:prepare', async (_event, gameVersion) => prepareClient(gameVersion));
 ipcMain.handle('game:get-status', async () => ({
@@ -1788,13 +1967,27 @@ ipcMain.handle('window:control', async (_event, action) => {
   return true;
 });
 
-ipcMain.handle('dialog:choose-java', async () => {
+ipcMain.handle('dialog:choose-java', async (_event, major = 25) => {
+  const expectedMajor = Number(major) === 21 ? 21 : 25;
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select Java 25 executable',
+    title: `Select Java ${expectedMajor} executable`,
     properties: ['openFile'],
     filters: process.platform === 'win32' ? [{ name: 'Java', extensions: ['exe'] }] : []
   });
-  return result.canceled ? null : result.filePaths[0];
+  if (result.canceled) return null;
+
+  const selected = result.filePaths[0];
+  const inspection = await inspectJava(selected, expectedMajor);
+  if (!inspection.ok) {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: `Invalid Java ${expectedMajor}`,
+      message: `That executable cannot be used for Java ${expectedMajor}.`,
+      detail: inspection.reason || `The selected executable does not report Java ${expectedMajor}.`
+    });
+    return null;
+  }
+  return selected;
 });
 
 ipcMain.handle('folder:open-client', async () => {
@@ -1919,13 +2112,23 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
 
     const minRam = Math.max(2, Number(merged.minRamGb) || 4);
     const maxRam = Math.max(minRam, Number(merged.maxRamGb) || 6);
-    await saveSettings(merged);
 
-    let javaExecutable = merged.javaPath?.trim() || '';
-    if (!javaExecutable) {
-      send('game-state', { state: 'installing', text: 'Preparing Java 25…' });
-      javaExecutable = await ensureManagedJava25();
+    const requiredJavaMajor = getClientProfile(selectedGameVersion).javaMajor;
+    const javaOverrideKey = javaSettingsKey(requiredJavaMajor);
+    let javaExecutable = String(merged[javaOverrideKey] || '').trim();
+    if (javaExecutable) {
+      const inspection = await inspectJava(javaExecutable, requiredJavaMajor);
+      if (!inspection.ok) {
+        throw new Error(`Custom Java ${requiredJavaMajor} is invalid: ${inspection.reason}`);
+      }
+      log(`[Java] Using custom Java ${requiredJavaMajor}: ${javaExecutable}`, 'launcher');
+    } else {
+      send('game-state', { state: 'installing', text: `Preparing Java ${requiredJavaMajor}…` });
+      javaExecutable = await ensureManagedJava(requiredJavaMajor);
     }
+
+    // Persist only after any manually-entered Java override has passed validation.
+    await saveSettings(merged);
 
     send('game-state', { state: 'installing', text: 'Checking client files…' });
     const fabric = await prepareClient(selectedGameVersion);
@@ -2034,10 +2237,10 @@ app.whenReady().then(async () => {
   createWindow();
   setupAutoUpdater();
 
-  // Install SpectorClient's private Java 25 runtime automatically on first launch.
-  // It lives under %APPDATA%\spectorclient and does not require a system-wide Java install.
+  // Warm up Java 25 for the default 26.2 client. Java 21 is installed
+  // automatically when the user launches SpectorClient 1.21.11.
   setTimeout(() => {
-    ensureManagedJava25().catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
+    ensureManagedJava(25).catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
   }, 450);
 
   // Fabric API is a required core mod. Keep the currently selected client version current at startup.

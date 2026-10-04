@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('launcher', {
   installMod: (gameVersion, projectId) => ipcRenderer.invoke('mods:install', gameVersion, projectId),
   removeMod: (gameVersion, filename) => ipcRenderer.invoke('mods:remove', gameVersion, filename),
 
-  chooseJava: () => ipcRenderer.invoke('dialog:choose-java'),
+  chooseJava: (major = 25) => ipcRenderer.invoke('dialog:choose-java', major),
   openClientFolder: () => ipcRenderer.invoke('folder:open-client'),
   openModsFolder: (gameVersion) => ipcRenderer.invoke('folder:open-mods', gameVersion),
   launchGame: (options) => ipcRenderer.invoke('game:launch', options),

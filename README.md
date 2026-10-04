@@ -1,7 +1,7 @@
-# SpectorClient Launcher v1.6.15
+# SpectorClient Launcher v1.6.16
 
 
-## Automatic launcher updates (v1.6.15)
+## Automatic launcher updates (v1.6.16)
 
 Packaged NSIS installs check GitHub Releases about one second after startup and then every 60 seconds while no update is already pending. New releases download automatically. If Minecraft is not running, SpectorClient immediately restarts into the updater as soon as the download finishes. If Minecraft is running (or still launching), SpectorClient waits in the background and installs the downloaded update automatically the moment the game exits.
 
@@ -18,13 +18,24 @@ Electron launcher for **Minecraft Java 26.2 + Fabric** and **Minecraft Java 1.21
 
 This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`. Packaged NSIS installs check for launcher updates automatically, download newer releases in the background, and install the downloaded update when the launcher closes.
 
-The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.15`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
+The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.16`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
 
 ### One-click first publish
 
 On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication on your own PC, copies this prepared source into the repository, pushes `main`, and pushes the matching version tag so GitHub Actions creates the release. No GitHub token needs to be pasted into ChatGPT or stored in the launcher.
 
 
+
+
+## What changed in v1.6.16
+
+- SpectorClient **26.2** uses a dedicated managed **Java 25** runtime.
+- SpectorClient **1.21.11** uses a separate managed **Java 21** runtime under `%APPDATA%\spectorclient\runtime\java-21`.
+- Java downloads now resolve the current Eclipse Temurin package through the Adoptium API and verify the exact expected file size and **SHA-256 checksum** before extraction.
+- Managed Java is accepted only after `java.exe` reports the required major version and successfully creates a small test JVM. Broken/incomplete existing runtimes are automatically reinstalled.
+- Windows extraction prefers built-in `tar.exe` and falls back to an encoded PowerShell `Expand-Archive` command, avoiding the quoting/extraction failure from older builds.
+- Minecraft now launches with `java.exe` rather than `javaw.exe`, so JVM startup failures are captured in launcher logs instead of only appearing as a Windows Java VM popup.
+- Settings now has separate Java 25 and Java 21 override fields and validates a selected executable before saving it for use.
 
 ## What changed in v1.6.15
 
@@ -115,6 +126,7 @@ On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication 
 - Windows 10/11 recommended
 - Node.js 22+
 - Java 25 for Minecraft 26.2
+- Java 21 for Minecraft 1.21.11
 - A Microsoft account that owns Minecraft Java Edition
 - Internet connection for Microsoft authentication, Minecraft/Fabric assets, Modrinth, SpectorClient updates and initial logo download
 
@@ -271,9 +283,9 @@ A new Classic Pink light-pink launcher theme is included alongside the unchanged
 The SpectorClient logo is center-zoomed by 10% during asset preparation. The same processed PNG is used by the launcher UI, Electron window/taskbar icon, and Windows build icon.
 
 
-## Automatic Java 25
+## Automatic Java runtimes
 
-On first launcher start, SpectorClient automatically downloads the latest GA Eclipse Temurin Java 25 runtime from the Adoptium API and installs it privately under `%APPDATA%\spectorclient\runtime\java-25`. No system-wide Java installation or administrator prompt is required. The launcher reuses this runtime on later starts and only uses a different Java executable if one is explicitly selected in Settings. If the smaller JRE package is unavailable, it automatically falls back to the Java 25 JDK package.
+SpectorClient 26.2 uses managed Eclipse Temurin Java 25 under `%APPDATA%\spectorclient\runtime\java-25`, while SpectorClient 1.21.11 uses managed Java 21 under `%APPDATA%\spectorclient\runtime\java-21`. Downloads are resolved through the Adoptium API, verified against Adoptium's package size and SHA-256 checksum, extracted, and then smoke-tested before use. If a JRE package is unavailable, the launcher falls back to the matching JDK package.
 
 
 ## Microsoft sign-in convenience

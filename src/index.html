@@ -295,10 +295,13 @@
           </div>
 
           <div class="setting-card full-card">
-            <h3>Java 25</h3>
-            <label>Java executable</label>
-            <div class="field-action"><input id="javaPath" placeholder="Automatic: SpectorClient managed Java 25" /><button id="chooseJavaBtn" class="secondary-btn">Browse</button></div>
-            <p class="hint">SpectorClient automatically installs its own Java 25 runtime on first launch. Leave this blank to use it, or Browse to override it with your own Java 25 executable.</p>
+            <h3>Java runtimes</h3>
+            <label>Java 25 executable — SpectorClient 26.2</label>
+            <div class="field-action"><input id="java25Path" placeholder="Automatic: managed Java 25" /><button id="chooseJava25Btn" class="secondary-btn">Browse</button></div>
+            <p class="hint">26.2 automatically uses a verified SpectorClient-managed Java 25 runtime. Leave this blank unless you want to override it.</p>
+            <label style="margin-top:14px;display:block">Java 21 executable — SpectorClient 1.21.11</label>
+            <div class="field-action"><input id="java21Path" placeholder="Automatic: managed Java 21" /><button id="chooseJava21Btn" class="secondary-btn">Browse</button></div>
+            <p class="hint">1.21.11 automatically downloads and uses a separate verified Java 21 runtime.</p>
           </div>
 
           <div class="setting-card full-card">

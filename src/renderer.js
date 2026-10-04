@@ -488,7 +488,7 @@ function syncScaleUi(scale) {
 }
 
 function fillSettings() {
-  ['minRamGb', 'maxRamGb', 'javaPath', 'width', 'height'].forEach((id) => {
+  ['minRamGb', 'maxRamGb', 'java25Path', 'java21Path', 'width', 'height'].forEach((id) => {
     $(id).value = settings?.[id] ?? '';
   });
   $('fullscreen').checked = Boolean(settings?.fullscreen);
@@ -506,7 +506,8 @@ function collectSettings() {
     selectedGameVersion: selectedGameVersion(),
     minRamGb: Number($('minRamGb').value),
     maxRamGb: Number($('maxRamGb').value),
-    javaPath: $('javaPath').value.trim(),
+    java25Path: $('java25Path').value.trim(),
+    java21Path: $('java21Path').value.trim(),
     width: Number($('width').value),
     height: Number($('height').value),
     fullscreen: $('fullscreen').checked,
@@ -1015,9 +1016,13 @@ $('soundVolume').addEventListener('change', () => playUiSound('click'));
 $('uiScale').addEventListener('input', () => {
   $('uiScaleValue').textContent = `${$('uiScale').value}%`;
 });
-$('chooseJavaBtn').addEventListener('click', async () => {
-  const selected = await window.launcher.chooseJava();
-  if (selected) $('javaPath').value = selected;
+$('chooseJava25Btn').addEventListener('click', async () => {
+  const selected = await window.launcher.chooseJava(25);
+  if (selected) $('java25Path').value = selected;
+});
+$('chooseJava21Btn').addEventListener('click', async () => {
+  const selected = await window.launcher.chooseJava(21);
+  if (selected) $('java21Path').value = selected;
 });
 $('openClientFolderBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClientFolder());
