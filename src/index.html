@@ -117,7 +117,7 @@
               <span class="version-card-kicker">SPECTORCLIENT</span>
               <h3>26.2</h3>
               <p>Fabric • Migrated dedicated instance</p>
-              <code>%APPDATA%\spectorclient\instances\26.2\mods</code>
+              <code id="versionModsPath26">SpectorClient data/instances/26.2/mods</code>
             </div>
             <span class="version-card-action">Select →</span>
           </button>
@@ -128,7 +128,7 @@
               <span class="version-card-kicker">SPECTORCLIENT</span>
               <h3>1.21.11</h3>
               <p>Fabric • Dedicated instance and mods</p>
-              <code>%APPDATA%\spectorclient\instances\1.21.11\mods</code>
+              <code id="versionModsPath12111">SpectorClient data/instances/1.21.11/mods</code>
             </div>
             <span class="version-card-action">Select →</span>
           </button>
@@ -154,11 +154,11 @@
           <div class="mod-version-grid">
             <button class="mod-version-card" data-mod-game-version="26.2">
               <b>SpectorClient 26.2</b>
-              <span>Fabric • %APPDATA%\spectorclient\instances\26.2\mods</span>
+              <span id="modChooserPath26">Fabric • SpectorClient data/instances/26.2/mods</span>
             </button>
             <button class="mod-version-card" data-mod-game-version="1.21.11">
               <b>SpectorClient 1.21.11</b>
-              <span>Fabric • %APPDATA%\spectorclient\instances\1.21.11\mods</span>
+              <span id="modChooserPath12111">Fabric • SpectorClient data/instances/1.21.11/mods</span>
             </button>
           </div>
         </div>
@@ -311,7 +311,7 @@
 
           <div class="setting-card full-card">
             <h3>SpectorClient directory</h3>
-            <div class="path-row"><code id="gameDirectory">%APPDATA%\spectorclient</code><button id="openClientFolderBtn" class="secondary-btn">Open folder</button></div>
+            <div class="path-row"><code id="gameDirectory">SpectorClient data</code><button id="openClientFolderBtn" class="secondary-btn">Open folder</button></div>
           </div>
 
           <div class="setting-card">

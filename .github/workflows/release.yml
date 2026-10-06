@@ -1,4 +1,4 @@
-name: Release SpectorClient for Windows
+name: Release SpectorClient for Windows + Linux
 
 on:
   push:
@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-windows:
+  build-windows:
+    name: Build Windows NSIS
     runs-on: windows-latest
 
     steps:
@@ -26,16 +27,13 @@ jobs:
           node-version: '22'
 
       - name: Verify tag matches package version
-        id: version
         shell: pwsh
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
-          $version = [string]$package.version
-          $expected = "v$version"
+          $expected = "v$($package.version)"
           if ("${{ github.ref_name }}" -ne $expected) {
             throw "Tag ${{ github.ref_name }} does not match package.json version $expected"
           }
-          "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -47,227 +45,266 @@ jobs:
           node --check src/preload.js
           node --check src/renderer.js
           node --check src/logs.js
+          node --check scripts/fetch-brand.js
 
-      - name: Build NSIS updater artifacts
-        run: npm run build:release
+      - name: Build Windows updater artifacts
+        run: npm run release:win
 
-      - name: Verify updater artifacts before publishing
+      - name: Verify Windows updater artifacts
         shell: pwsh
         run: |
-          $version = "${{ steps.version.outputs.version }}"
+          $version = [string](Get-Content package.json -Raw | ConvertFrom-Json).version
           $exe = "dist/SpectorClient-$version-x64.exe"
           $blockmap = "$exe.blockmap"
-          $latestPath = "dist/latest.yml"
-          $required = @($exe, $blockmap, $latestPath)
-
-          foreach ($file in $required) {
-            if (-not (Test-Path -LiteralPath $file)) { throw "Required update artifact is missing: $file" }
-            $size = (Get-Item -LiteralPath $file).Length
-            if ($size -le 0) { throw "Required update artifact is empty: $file" }
-            Write-Host "Verified $file ($size bytes)"
+          $latestPath = 'dist/latest.yml'
+          foreach ($file in @($exe, $blockmap, $latestPath)) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Missing Windows release file: $file" }
+            if ((Get-Item -LiteralPath $file).Length -le 0) { throw "Empty Windows release file: $file" }
           }
 
           $latest = Get-Content -LiteralPath $latestPath -Raw
-          if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
-            throw "latest.yml does not advertise version $version"
-          }
-          if ($latest -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) {
-            throw "latest.yml does not reference the expected installer"
-          }
+          if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") { throw "latest.yml does not advertise $version" }
+          if ($latest -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) { throw 'latest.yml points to the wrong Windows installer' }
 
-          $sha512Line = [regex]::Match($latest, '(?m)^\s*sha512:\s*([^\r\n]+)')
-          if (-not $sha512Line.Success) { throw 'latest.yml does not contain an installer sha512' }
-          $manifestSha512 = $sha512Line.Groups[1].Value.Trim().Trim('"').Trim("'")
-          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $exe))
-          $hash = [System.Security.Cryptography.SHA512]::HashData($bytes)
-          $actualSha512 = [Convert]::ToBase64String($hash)
-          if ($actualSha512 -ne $manifestSha512) {
-            throw 'latest.yml sha512 does not match the built installer'
-          }
-          Write-Host 'latest.yml checksum matches the NSIS installer.'
+          $sha = [regex]::Match($latest, '(?m)^\s*sha512:\s*([^\r\n]+)')
+          if (-not $sha.Success) { throw 'latest.yml does not contain sha512' }
+          $expectedSha = $sha.Groups[1].Value.Trim().Trim('"').Trim("'")
+          $actualSha = [Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData([System.IO.File]::ReadAllBytes((Resolve-Path $exe))))
+          if ($expectedSha -ne $actualSha) { throw 'Windows installer sha512 does not match latest.yml' }
 
-      - name: Remove stale failed draft releases
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectorclient-windows-release
+          if-no-files-found: error
+          retention-days: 2
+          path: |
+            dist/SpectorClient-*-x64.exe
+            dist/SpectorClient-*-x64.exe.blockmap
+            dist/latest.yml
+
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify tag matches package version
+        shell: bash
         run: |
-          # v1.6.5 and v1.6.6 failed after creating drafts because draft releases
-          # are not returned by /releases/tags/{tag}. Remove those known failed drafts.
-          $staleTags = @('v1.6.5', 'v1.6.6', 'v1.6.7', 'v1.6.8')
-          $releases = gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json
-          foreach ($staleTag in $staleTags) {
-            $matches = @($releases | Where-Object { $_.draft -eq $true -and $_.tag_name -eq $staleTag })
-            foreach ($release in $matches) {
-              Write-Host "Removing stale failed draft $staleTag (release id $($release.id))..."
-              gh api -X DELETE "repos/${{ github.repository }}/releases/$($release.id)"
-              if ($LASTEXITCODE -ne 0) { throw "Could not remove stale draft release $staleTag" }
-            }
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "Tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax check launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer.js
+          node --check src/logs.js
+          node --check scripts/fetch-brand.js
+
+      - name: Build Linux AppImage updater artifacts
+        run: npm run release:linux
+
+      - name: Verify Linux updater artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          appimage="dist/SpectorClient-${version}-x64.AppImage"
+          metadata="dist/latest-linux.yml"
+          test -s "$appimage" || { echo "Missing/empty $appimage"; exit 1; }
+          test -s "$metadata" || { echo "Missing/empty $metadata"; exit 1; }
+          chmod +x "$appimage"
+
+          VERSION="$version" APPIMAGE_PATH="$appimage" METADATA_PATH="$metadata" node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const version = process.env.VERSION;
+          const appImage = process.env.APPIMAGE_PATH;
+          const metadataPath = process.env.METADATA_PATH;
+          const metadata = fs.readFileSync(metadataPath, 'utf8');
+          if (!new RegExp(`^version:\\s*${version.replace(/\\./g, '\\\\.')}\\s*$`, 'm').test(metadata)) {
+            throw new Error(`latest-linux.yml does not advertise ${version}`);
           }
+          const expectedName = `SpectorClient-${version}-x64.AppImage`;
+          if (!metadata.includes(expectedName)) throw new Error('latest-linux.yml points to the wrong AppImage');
+          const match = metadata.match(/^\s*sha512:\s*([^\r\n]+)/m);
+          if (!match) throw new Error('latest-linux.yml does not contain sha512');
+          const expected = match[1].trim().replace(/^['"]|['"]$/g, '');
+          const actual = crypto.createHash('sha512').update(fs.readFileSync(appImage)).digest('base64');
+          if (expected !== actual) throw new Error('Linux AppImage sha512 does not match latest-linux.yml');
+          NODE
+
+      - name: Upload Linux release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectorclient-linux-release
+          if-no-files-found: error
+          retention-days: 2
+          path: |
+            dist/SpectorClient-*-x64.AppImage
+            dist/latest-linux.yml
+
+  publish-release:
+    name: Publish verified Windows + Linux release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download verified build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete cross-platform release set
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          expected=(
+            "dist/SpectorClient-${version}-x64.exe"
+            "dist/SpectorClient-${version}-x64.exe.blockmap"
+            "dist/latest.yml"
+            "dist/SpectorClient-${version}-x64.AppImage"
+            "dist/latest-linux.yml"
+          )
+          for file in "${expected[@]}"; do
+            test -s "$file" || { echo "Release file missing or empty: $file"; exit 1; }
+            echo "Verified $file ($(stat -c%s "$file") bytes)"
+          done
+
+      - name: Remove stale/current draft release objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          # Remove a release object for this tag if a previous attempt left one.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes
+          fi
+
+          # Clean the known failed drafts from the earlier updater pipeline.
+          releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
+          for stale in v1.6.5 v1.6.6 v1.6.7 v1.6.8; do
+            ids="$(printf '%s' "$releases" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const r of JSON.parse(s)){if(r.draft&&r.tag_name===process.argv[1]) console.log(r.id)}})" "$stale")"
+            while IFS= read -r id; do
+              [ -z "$id" ] || gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/$id"
+            done <<< "$ids"
+          done
 
       - name: Create clean draft release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = "${{ steps.version.outputs.version }}"
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          gh release create "${GITHUB_REF_NAME}" --draft --title "SpectorClient ${version}" --target "${GITHUB_SHA}" --generate-notes
 
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Removing existing release object for $tag before rebuilding it..."
-            gh release delete $tag --yes
-            if ($LASTEXITCODE -ne 0) { throw "Could not remove the existing release for $tag" }
-          }
-
-          gh release create $tag --draft --title "SpectorClient $version" --target "${{ github.sha }}" --generate-notes
-          if ($LASTEXITCODE -ne 0) { throw "Could not create draft release $tag" }
-
-      - name: Upload all updater artifacts to draft
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload all Windows and Linux updater files
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = "${{ steps.version.outputs.version }}"
-          gh release upload $tag `
-            "dist/SpectorClient-$version-x64.exe" `
-            "dist/SpectorClient-$version-x64.exe.blockmap" `
-            "dist/latest.yml" `
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          gh release upload "${GITHUB_REF_NAME}" \
+            "dist/SpectorClient-${version}-x64.exe" \
+            "dist/SpectorClient-${version}-x64.exe.blockmap" \
+            "dist/latest.yml" \
+            "dist/SpectorClient-${version}-x64.AppImage" \
+            "dist/latest-linux.yml" \
             --clobber
-          if ($LASTEXITCODE -ne 0) { throw "Could not upload release artifacts for $tag" }
 
-      - name: Verify uploaded draft assets and digests
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify draft release assets
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = "${{ steps.version.outputs.version }}"
-          $expectedFiles = @(
-            "SpectorClient-$version-x64.exe",
-            "SpectorClient-$version-x64.exe.blockmap",
-            "latest.yml"
-          )
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          view="$(gh release view "${GITHUB_REF_NAME}" --json databaseId,tagName,isDraft)"
+          release_id="$(printf '%s' "$view" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).databaseId")"
+          is_draft="$(printf '%s' "$view" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).isDraft")"
+          test "$is_draft" = "true" || { echo 'Release must still be draft during verification'; exit 1; }
 
-          # IMPORTANT: /releases/tags/{tag} returns 404 for draft releases.
-          # Ask gh release view for the draft's database ID, then query by ID.
-          $viewJson = gh release view $tag --json databaseId,tagName,isDraft
-          if ($LASTEXITCODE -ne 0) { throw "Could not resolve draft release $tag" }
-          $view = $viewJson | ConvertFrom-Json
-          if ($view.tagName -ne $tag) { throw "Resolved release tag is $($view.tagName), expected $tag" }
-          if (-not $view.isDraft) { throw "Release $tag must still be a draft during verification" }
-          if (-not $view.databaseId) { throw "Draft release $tag has no database ID" }
-
-          $release = gh api "repos/${{ github.repository }}/releases/$($view.databaseId)" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Could not read draft release $tag by ID" }
-          $assets = @($release.assets)
-
-          foreach ($name in $expectedFiles) {
-            $asset = $assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
-            if (-not $asset) { throw "Draft release is missing required asset: $name" }
-            if ([int64]$asset.size -le 0) { throw "Draft release asset is empty: $name" }
-            Write-Host "Draft contains $name ($($asset.size) bytes)"
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")"
+          RELEASE_JSON="$release" VERSION="$version" node <<'NODE'
+          const release = JSON.parse(process.env.RELEASE_JSON);
+          const v = process.env.VERSION;
+          const expected = [
+            `SpectorClient-${v}-x64.exe`,
+            `SpectorClient-${v}-x64.exe.blockmap`,
+            'latest.yml',
+            `SpectorClient-${v}-x64.AppImage`,
+            'latest-linux.yml'
+          ];
+          const assets = new Map((release.assets || []).map(a => [a.name, a]));
+          for (const name of expected) {
+            const asset = assets.get(name);
+            if (!asset || Number(asset.size) <= 0) throw new Error(`Draft release is missing/empty: ${name}`);
+            console.log(`Draft contains ${name} (${asset.size} bytes)`);
           }
-
-          $exeName = "SpectorClient-$version-x64.exe"
-          $exeAsset = $assets | Where-Object { $_.name -eq $exeName } | Select-Object -First 1
-          if ($exeAsset.digest -and $exeAsset.digest -match '^sha256:(.+)$') {
-            $remoteSha = $Matches[1].ToLowerInvariant()
-            $localSha = (Get-FileHash "dist/$exeName" -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($remoteSha -ne $localSha) { throw 'Uploaded installer SHA256 does not match the local build' }
-            Write-Host 'Uploaded installer digest matches the local build.'
-          }
+          NODE
 
       - name: Publish verified release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          gh release edit $tag --draft=false --latest
-          if ($LASTEXITCODE -ne 0) { throw "Could not publish verified release $tag" }
+          set -euo pipefail
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
 
-      - name: Verify published auto-update release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify public Windows + Linux auto-update endpoints
+        shell: bash
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = "${{ steps.version.outputs.version }}"
-          $expected = @(
-            "latest.yml",
-            "SpectorClient-$version-x64.exe",
-            "SpectorClient-$version-x64.exe.blockmap"
-          )
-          $headers = @{
-            'Cache-Control' = 'no-cache'
-            'Pragma' = 'no-cache'
-            'User-Agent' = 'SpectorClient-Release-Verification'
-          }
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}"
+          verify_dir="${RUNNER_TEMP}/spector-release-verify-${version}"
+          mkdir -p "$verify_dir"
 
-          # First verify GitHub itself sees this tag as a normal published release
-          # and that all updater assets are attached to exactly this release.
-          $release = gh api "repos/${{ github.repository }}/releases/tags/$tag" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Published release $tag cannot be read from GitHub" }
-          if ($release.tag_name -ne $tag) { throw "Published release tag is $($release.tag_name), expected $tag" }
-          if ($release.draft -or $release.prerelease) { throw "Release $tag is not a normal published release" }
+          curl -fL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' -A 'SpectorClient-Release-Verification' \
+            "$base/latest.yml" -o "$verify_dir/latest.yml"
+          curl -fL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' -A 'SpectorClient-Release-Verification' \
+            "$base/latest-linux.yml" -o "$verify_dir/latest-linux.yml"
 
-          $assetNames = @($release.assets | ForEach-Object { $_.name })
-          foreach ($required in $expected) {
-            if ($assetNames -notcontains $required) { throw "Published release is missing $required" }
-          }
+          grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest.yml"
+          grep -Fq "SpectorClient-${version}-x64.exe" "$verify_dir/latest.yml"
+          grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest-linux.yml"
+          grep -Fq "SpectorClient-${version}-x64.AppImage" "$verify_dir/latest-linux.yml"
 
-          # Verify the exact-tag URLs that electron-updater ultimately downloads.
-          # Do NOT use /releases/latest/download here: GitHub can cache/lag that
-          # convenience redirect for minutes after a new release is published.
-          $metadataUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/latest.yml"
-          $installerUrl = "https://github.com/${{ github.repository }}/releases/download/$tag/SpectorClient-$version-x64.exe"
+          curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
+            "$base/SpectorClient-${version}-x64.exe" >/dev/null
+          curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
+            "$base/SpectorClient-${version}-x64.AppImage" >/dev/null
 
-          # GitHub serves latest.yml as application/octet-stream. In PowerShell 7,
-          # Invoke-WebRequest can expose that body as Byte[], and casting Byte[]
-          # to [string] produces "System.Byte[]" instead of the YAML text. Download
-          # it to disk first, then read the actual UTF-8 text.
-          $verifyDir = Join-Path $env:RUNNER_TEMP "spector-update-verify-$version"
-          New-Item -ItemType Directory -Force -Path $verifyDir | Out-Null
-          $metadataFile = Join-Path $verifyDir 'latest.yml'
-          Remove-Item -LiteralPath $metadataFile -Force -ErrorAction SilentlyContinue
+          latest_ok=0
+          last_seen=''
+          for attempt in $(seq 1 24); do
+            latest_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"
+            last_seen="$(printf '%s' "$latest_json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).tag_name")"
+            if [ "$last_seen" = "$tag" ]; then
+              latest_ok=1
+              break
+            fi
+            echo "Waiting for latest release pointer to move to $tag (currently $last_seen)..."
+            sleep 5
+          done
+          test "$latest_ok" = 1 || { echo "Latest release pointer did not move to $tag (last seen $last_seen)"; exit 1; }
 
-          $metadata = Invoke-WebRequest -Uri $metadataUrl -Headers $headers -MaximumRedirection 10 -OutFile $metadataFile -PassThru
-          if ($metadata.StatusCode -ne 200) { throw "Tagged latest.yml returned HTTP $($metadata.StatusCode)" }
-          if (-not (Test-Path -LiteralPath $metadataFile)) { throw 'Tagged latest.yml was not downloaded' }
-          if ((Get-Item -LiteralPath $metadataFile).Length -le 0) { throw 'Tagged latest.yml download is empty' }
-
-          $latestText = Get-Content -LiteralPath $metadataFile -Raw -Encoding UTF8
-          if ($latestText -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") { throw "Tagged latest.yml is not version $version" }
-          if ($latestText -notmatch [regex]::Escape("SpectorClient-$version-x64.exe")) { throw 'Tagged latest.yml points to the wrong installer' }
-
-          # Verify the installer URL resolves without downloading the full EXE.
-          $installerHead = Invoke-WebRequest -Uri $installerUrl -Method Head -Headers $headers -MaximumRedirection 10
-          if ($installerHead.StatusCode -lt 200 -or $installerHead.StatusCode -ge 400) { throw "Tagged installer returned HTTP $($installerHead.StatusCode)" }
-
-          # The API's latest-release pointer is what matters for discovery. It can
-          # take a few seconds to update, so poll that API directly instead of the
-          # cached /releases/latest/download shortcut. Never re-draft a valid
-          # release merely because the shortcut CDN is still serving an old asset.
-          $latestOk = $false
-          $lastSeen = $null
-          for ($attempt = 1; $attempt -le 24; $attempt++) {
-            $apiLatest = gh api "repos/${{ github.repository }}/releases/latest" | ConvertFrom-Json
-            if ($LASTEXITCODE -eq 0) {
-              $lastSeen = $apiLatest.tag_name
-              if ($apiLatest.tag_name -eq $tag -and -not $apiLatest.draft -and -not $apiLatest.prerelease) {
-                $latestOk = $true
-                break
-              }
-            }
-            Write-Host "Waiting for GitHub latest-release API to point to $tag (currently $lastSeen)..."
-            Start-Sleep -Seconds 5
-          }
-
-          if (-not $latestOk) {
-            throw "GitHub latest-release API did not move to $tag (last seen: $lastSeen). The release remains published for inspection."
-          }
-
-          Write-Host "Auto-update release verified for SpectorClient $version." -ForegroundColor Green
-          Write-Host "Metadata: $metadataUrl" -ForegroundColor DarkGreen
-          Write-Host "Installer: $installerUrl" -ForegroundColor DarkGreen
+          echo "Windows and Linux updater endpoints verified for SpectorClient ${version}."

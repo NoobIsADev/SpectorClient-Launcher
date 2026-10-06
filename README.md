@@ -1,41 +1,62 @@
-# SpectorClient Launcher v1.6.16
+# SpectorClient Launcher v1.6.20
 
+## Windows + Linux support (v1.6.20)
 
-## Automatic launcher updates (v1.6.16)
+SpectorClient now ships as a **Windows NSIS installer** and a **Linux x64 AppImage** from the same GitHub Release. The Linux AppImage keeps the same launcher UI and feature set: Microsoft sign-in, SpectorClient 26.2/1.21.11 selection, isolated instances/mod folders, Modrinth manager, dependency installs, themes, logs/filters, sounds, 3D skin viewer, managed Java 25/21, native desktop notifications, Play/Stop, SpectorClient mod updating, and direct-to-latest launcher auto-update.
 
-Packaged NSIS installs check GitHub Releases about one second after startup and then every 60 seconds while no update is already pending. New releases download automatically. If Minecraft is not running, SpectorClient immediately restarts into the updater as soon as the download finishes. If Minecraft is running (or still launching), SpectorClient waits in the background and installs the downloaded update automatically the moment the game exits.
-
-`autoInstallOnAppQuit` is disabled intentionally so closing the launcher cannot install an update on top of a running Minecraft session. If an update is ready while the game is active, closing the main launcher window hides it instead so the updater can safely finish after Minecraft closes.
-
-Electron launcher for **Minecraft Java 26.2 + Fabric** and **Minecraft Java 1.21.11 + Fabric**, with version-aware instances and mods:
+Launcher/game data is stored separately from the application:
 
 ```text
-%APPDATA%\spectorclient
+Windows: %APPDATA%\spectorclient
+Linux:   $XDG_CONFIG_HOME/spectorclient  (normally ~/.config/spectorclient)
 ```
 
+### Automatic launcher updates
 
-## Automatic launcher updates
+This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`.
 
-This build uses `electron-updater` with GitHub Releases at `NoobIsADev/SpectorClient-Launcher`. Packaged NSIS installs check for launcher updates automatically, download newer releases in the background, and install the downloaded update when the launcher closes.
+- **Windows:** NSIS builds use `latest.yml` and update the installed application in place.
+- **Linux:** AppImage builds use `latest-linux.yml` and replace/restart the running AppImage in place.
+- Both platforms check shortly after startup and then poll while no update is already being downloaded/installed.
+- If Minecraft is running, the launcher waits until the game exits before installing the launcher update.
+- Right before installation SpectorClient checks GitHub's newest published release so it skips intermediate launcher versions and jumps directly to the latest.
 
-The repository includes `.github/workflows/release.yml`. Pushing a tag that exactly matches `package.json` (for example `v1.6.16`) builds and publishes the Windows NSIS release, its blockmap, and `latest.yml`.
+Linux auto-update requires running the distributed `.AppImage` file itself; an extracted AppImage directory is treated as non-updatable. The AppImage uses electron-builder's modern static runtime toolset so modern distributions do not need the old FUSE2 runtime.
 
-### One-click first publish
+### Managed Java on both platforms
 
-On Windows, double-click `PUSH-AND-RELEASE.bat`. It keeps GitHub authentication on your own PC, copies this prepared source into the repository, pushes `main`, and pushes the matching version tag so GitHub Actions creates the release. No GitHub token needs to be pasted into ChatGPT or stored in the launcher.
+SpectorClient 26.2 uses Java 25 and SpectorClient 1.21.11 uses Java 21. On both Windows and Linux the launcher resolves Eclipse Temurin from Adoptium, checks the advertised package size and SHA-256, extracts it, validates the reported major version, and performs a JVM smoke test before accepting the runtime.
 
+### Cross-platform GitHub release
 
+Pushing a version tag matching `package.json` (for example `v1.6.20`) now runs two builders in GitHub Actions:
 
+- `windows-latest` → `SpectorClient-1.6.20-x64.exe`, blockmap, `latest.yml`
+- `ubuntu-latest` → `SpectorClient-1.6.20-x64.AppImage`, `latest-linux.yml`
 
-## What changed in v1.6.16
+A final publish job waits for both builds, verifies all five updater assets, uploads them to one draft GitHub Release, then publishes it only after the cross-platform release set is complete.
 
-- SpectorClient **26.2** uses a dedicated managed **Java 25** runtime.
-- SpectorClient **1.21.11** uses a separate managed **Java 21** runtime under `%APPDATA%\spectorclient\runtime\java-21`.
-- Java downloads now resolve the current Eclipse Temurin package through the Adoptium API and verify the exact expected file size and **SHA-256 checksum** before extraction.
-- Managed Java is accepted only after `java.exe` reports the required major version and successfully creates a small test JVM. Broken/incomplete existing runtimes are automatically reinstalled.
-- Windows extraction prefers built-in `tar.exe` and falls back to an encoded PowerShell `Expand-Archive` command, avoiding the quoting/extraction failure from older builds.
-- Minecraft now launches with `java.exe` rather than `javaw.exe`, so JVM startup failures are captured in launcher logs instead of only appearing as a Windows Java VM popup.
-- Settings now has separate Java 25 and Java 21 override fields and validates a selected executable before saving it for use.
+### Publishing
+
+On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/tag and waits until the combined Windows + Linux GitHub Actions release succeeds, then verifies both platform updater files are present.
+
+## What changed in v1.6.20
+
+- Added Linux x64 AppImage packaging with automatic GitHub Release updates.
+- Added Linux `latest-linux.yml` generation and release verification.
+- Added automatic verified Temurin Java 25/21 installation on Linux (`tar.gz` packages + executable/JVM validation).
+- Native game-start/update/install notifications now use Electron desktop notifications on Windows and Linux.
+- Kept the Windows notification permission/settings helper; Linux uses the desktop notification service provided by the user's environment.
+- Version/mod-folder paths shown in the UI now come from the running platform instead of hardcoded `%APPDATA%` strings.
+- Kept every existing Windows feature and release artifact unchanged while adding the Linux release path.
+
+## What changed in v1.6.19
+
+- Shows a native Windows notification as soon as Minecraft/SpectorClient successfully starts.
+- Requests renderer notification permission on startup when it has not been decided yet.
+- If notifications are explicitly blocked, offers to open Windows Notification Settings.
+- Uses a stable Windows AppUserModelID and Toast Activator CLSID for more reliable native notifications.
+- Reuses the same native notification system already used by launcher update notifications.
 
 ## What changed in v1.6.15
 

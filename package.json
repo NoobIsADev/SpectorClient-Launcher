@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.16",
-  "description": "SpectorClient Electron launcher with selectable Minecraft 26.2 and 1.21.11 Fabric clients, isolated instances, verified managed Java 25/21 runtimes, and automatic updates",
+  "version": "1.6.20",
+  "description": "SpectorClient Electron launcher for Windows and Linux with selectable Minecraft 26.2 and 1.21.11 Fabric clients, isolated instances, managed Java 25/21, native desktop notifications, and automatic direct-to-latest updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
@@ -17,7 +17,11 @@
     "predist:win": "npm run fetch-brand",
     "predist:portable": "npm run fetch-brand",
     "release:win": "npm run fetch-brand && electron-builder --win nsis --publish never",
-    "build:release": "npm run release:win"
+    "build:release": "npm run release:win",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "predist:linux": "npm run fetch-brand",
+    "release:linux": "npm run fetch-brand && electron-builder --linux AppImage --x64 --publish never",
+    "build:release:linux": "npm run release:linux"
   },
   "dependencies": {
     "minecraft-launcher-core": "3.18.2",
@@ -58,6 +62,37 @@
       "owner": "NoobIsADev",
       "repo": "SpectorClient-Launcher",
       "releaseType": "release"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "SpectorClient-${version}-${arch}.${ext}",
+      "icon": "build/icon.png",
+      "category": "Game",
+      "synopsis": "SpectorClient Minecraft launcher",
+      "description": "SpectorClient Minecraft launcher with Fabric clients, mod management, managed Java runtimes, Microsoft sign-in, logs, themes, and automatic updates.",
+      "desktop": {
+        "entry": {
+          "Name": "SpectorClient",
+          "Comment": "Launch SpectorClient for Minecraft",
+          "Categories": "Game;",
+          "StartupWMClass": "SpectorClient",
+          "Terminal": false,
+          "Type": "Application"
+        }
+      }
+    },
+    "appImage": {
+      "artifactName": "SpectorClient-${version}-${arch}.${ext}"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
     }
   }
 }

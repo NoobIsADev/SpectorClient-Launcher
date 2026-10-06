@@ -219,7 +219,7 @@ function gameVersionDetails(gameVersion) {
   return clientInfo?.supportedVersions?.find((entry) => entry.gameVersion === selected) || {
     gameVersion: selected,
     label: `SpectorClient ${selected}`,
-    modsDirectory: `%APPDATA%\\spectorclient\\instances\\${selected}\\mods`
+    modsDirectory: `SpectorClient data/instances/${selected}/mods`
   };
 }
 
@@ -286,7 +286,16 @@ function showView(name) {
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
+    // Default Mods to the same client version selected on the Home/Play screen.
+    // The existing Change version button still lets the user switch the Mods target independently.
     resetModsVersionSelection();
+    void selectModsVersion(selectedGameVersion()).catch((error) => {
+      resetModsVersionSelection();
+      if ($('modsDescription')) {
+        $('modsDescription').textContent = `Could not load mods for SpectorClient ${selectedGameVersion()}: ${error.message}`;
+      }
+      showToast(`Could not load mods: ${error.message}`);
+    });
   }
 }
 
@@ -494,10 +503,21 @@ function fillSettings() {
   $('fullscreen').checked = Boolean(settings?.fullscreen);
   $('closeLauncherOnStart').checked = Boolean(settings?.closeLauncherOnStart);
   $('serverAddress').value = settings?.serverAddress || '';
-  $('gameDirectory').textContent = clientInfo?.gameDirectory || settings?.gameDirectory || '%APPDATA%\\spectorclient';
+  $('gameDirectory').textContent = clientInfo?.gameDirectory || settings?.gameDirectory || 'SpectorClient data';
   syncScaleUi(settings?.uiScale || 1);
   applyAppearanceSettings();
   renderSelectedVersionUI();
+}
+
+function renderPlatformPaths() {
+  const versions = Array.isArray(clientInfo?.supportedVersions) ? clientInfo.supportedVersions : [];
+  const byVersion = Object.fromEntries(versions.map((entry) => [String(entry.gameVersion || ''), entry]));
+  const path26 = byVersion['26.2']?.modsDirectory || 'SpectorClient data/instances/26.2/mods';
+  const path12111 = byVersion['1.21.11']?.modsDirectory || 'SpectorClient data/instances/1.21.11/mods';
+  if ($('versionModsPath26')) $('versionModsPath26').textContent = path26;
+  if ($('versionModsPath12111')) $('versionModsPath12111').textContent = path12111;
+  if ($('modChooserPath26')) $('modChooserPath26').textContent = `Fabric • ${path26}`;
+  if ($('modChooserPath12111')) $('modChooserPath12111').textContent = `Fabric • ${path12111}`;
 }
 
 function collectSettings() {
@@ -1114,7 +1134,7 @@ window.launcher.onGameState((data) => {
 window.launcher.onUpdateState((data) => {
   if (!data?.state) return;
 
-  // Normal update lifecycle messages are delivered through native Windows
+  // Normal update lifecycle messages are delivered through native desktop
   // notifications by the Electron main process. Keep in-app toasts only for
   // failures/retry states so the user is not shown duplicate update popups.
   if (data.state === 'retrying') showToast(data.text || 'Update check will retry automatically.', 3600);
@@ -1134,6 +1154,30 @@ window.launcher.onLogsCleared(() => {
   $('logOutput').textContent = 'No logs yet.';
 });
 
+
+async function ensureNotificationPermission() {
+  try {
+    const status = await window.launcher.getNotificationStatus?.();
+    if (!status?.supported) return;
+    // Windows exposes an explicit notification permission prompt/settings page.
+    // Linux desktop notification servers do not provide a portable permission API.
+    if (status.platform !== 'win32') return;
+    if (typeof window.Notification === 'undefined') return;
+
+    let permission = window.Notification.permission;
+    if (permission === 'default') {
+      permission = await window.Notification.requestPermission();
+    }
+
+    if (permission === 'denied') {
+      await window.launcher.showNotificationPermissionHelp?.();
+    }
+  } catch (error) {
+    console.warn('Could not request notification permission:', error);
+  }
+}
+
+
 (async function init() {
   try {
     const [loadedSettings, loadedClientInfo, gameStatus, logHistory] = await Promise.all([
@@ -1148,11 +1192,15 @@ window.launcher.onLogsCleared(() => {
     runningGameVersion = gameStatus?.gameVersion || null;
     stoppingGame = false;
     fillSettings();
+    renderPlatformPaths();
     renderAllAccountUI();
     if (Array.isArray(logHistory) && logHistory.length) {
       $('logOutput').textContent = logHistory.map((entry) => `[${entry.type || 'launcher'}] ${entry.line || ''}`).join('\n') + '\n';
     }
     resetModsVersionSelection();
+    // Ask Chromium/Electron for notification permission where the OS exposes a
+    // request flow. Linux native notifications work through the desktop server.
+    ensureNotificationPermission();
   } catch (error) {
     $('status').textContent = `Startup error: ${error.message}`;
   }

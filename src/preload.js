@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('launcher', {
   openExternal: (url) => ipcRenderer.invoke('external:open', url),
   windowControl: (action) => ipcRenderer.invoke('window:control', action),
   checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  getNotificationStatus: () => ipcRenderer.invoke('notifications:status'),
+  showNotificationPermissionHelp: () => ipcRenderer.invoke('notifications:permission-help'),
 
   onAuthCode: (callback) => ipcRenderer.on('auth-code', (_event, data) => callback(data)),
   onAuthState: (callback) => ipcRenderer.on('auth-state', (_event, data) => callback(data)),

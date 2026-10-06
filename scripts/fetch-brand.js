@@ -99,7 +99,7 @@ async function prepareLogo() {
     png = await fetchBuffer(BRAND_URL, 8, 'https://imgur.com/');
     const { width, height } = pngDimensions(png);
     if (width < 256 || height < 256) {
-      throw new Error(`Logo is ${width}x${height}; Windows builds need at least 256x256.`);
+      throw new Error(`Logo is ${width}x${height}; Desktop builds need at least 256x256.`);
     }
     png = zoomPng(png, 1.10);
     await fsp.writeFile(UI_PNG_PATH, png);
@@ -109,14 +109,14 @@ async function prepareLogo() {
     png = await fsp.readFile(UI_PNG_PATH);
     const { width, height } = pngDimensions(png);
     if (width < 256 || height < 256) {
-      throw new Error(`Cached logo is ${width}x${height}; Windows builds need at least 256x256.`);
+      throw new Error(`Cached logo is ${width}x${height}; Desktop builds need at least 256x256.`);
     }
     process.stderr.write(`Logo refresh skipped (${error.message}); using cached copy.\n`);
   }
 
   await fsp.writeFile(BUILD_PNG_PATH, png);
   await fsp.rm(OLD_ICO_PATH, { force: true });
-  process.stdout.write(`Windows icon source prepared: ${BUILD_PNG_PATH}\n`);
+  process.stdout.write(`Desktop icon source prepared: ${BUILD_PNG_PATH}\n`);
 }
 
 async function preparePlayerBackground() {

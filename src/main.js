@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, Notification, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -10,14 +10,16 @@ const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
 
 // Keep only one SpectorClient process alive. Multiple launcher processes can
-// keep files in the install directory locked and make NSIS fail while replacing
-// an older version. A second launch focuses the existing window instead.
+// keep files in the install directory locked and make an in-place update fail.
+// A second launch focuses the existing window instead.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 }
 
 const PRODUCT_NAME = 'SpectorClient';
+const WINDOWS_APP_ID = 'client.spector.launcher';
+const WINDOWS_TOAST_CLSID = '{7C0F70F8-9A1B-4A7E-8C1E-7D2AF30F6C91}';
 const DEFAULT_GAME_VERSION = '26.2';
 const CLIENT_PROFILES = Object.freeze({
   '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download', javaMajor: 25 },
@@ -62,6 +64,8 @@ let downloadedUpdateInfo = null;
 let updateInstallPending = false;
 let updateInstallStarting = false;
 let updateDownloadInProgress = false;
+let updateInstallFreshnessPromise = null;
+let latestKnownUpdateVersion = null;
 let backgroundForUpdate = false;
 let gameLaunchInProgress = false;
 let lastUpdaterErrorFingerprint = '';
@@ -239,7 +243,17 @@ async function ensureDirs() {
 function temurinArch() {
   if (process.arch === 'x64') return 'x64';
   if (process.arch === 'arm64') return 'aarch64';
-  throw new Error(`Automatic Java installation does not support Windows ${process.arch}.`);
+  throw new Error(`Automatic Java installation does not support ${process.platform} ${process.arch}.`);
+}
+
+function temurinOs() {
+  if (process.platform === 'win32') return 'windows';
+  if (process.platform === 'linux') return 'linux';
+  throw new Error(`Automatic Java installation is not supported on ${process.platform}.`);
+}
+
+function temurinPlatformLabel() {
+  return process.platform === 'win32' ? 'Windows' : process.platform === 'linux' ? 'Linux' : process.platform;
 }
 
 function javaRuntimeDir(major) {
@@ -333,19 +347,19 @@ async function getTemurinPackage(major, arch, imageType) {
   const query = new URLSearchParams({
     architecture: arch,
     image_type: imageType,
-    os: 'windows',
+    os: temurinOs(),
     vendor: 'eclipse'
   });
   const url = `https://api.adoptium.net/v3/assets/latest/${major}/hotspot?${query.toString()}`;
   const assets = await request(url);
   if (!Array.isArray(assets) || !assets.length) {
-    throw new Error(`Eclipse Temurin does not currently list a Windows ${arch} Java ${major} ${imageType.toUpperCase()} package.`);
+    throw new Error(`Eclipse Temurin does not currently list a ${temurinPlatformLabel()} ${arch} Java ${major} ${imageType.toUpperCase()} package.`);
   }
 
   const asset = assets.find((entry) => {
     const binary = entry?.binary;
     return binary?.architecture === arch
-      && binary?.os === 'windows'
+      && binary?.os === temurinOs()
       && binary?.image_type === imageType
       && binary?.package?.link;
   }) || assets[0];
@@ -378,7 +392,7 @@ function downloadJavaArchive(url, destination, { redirects = 8, onProgress = nul
       const req = https.get(currentUrl, {
         headers: {
           'User-Agent': USER_AGENT,
-          Accept: 'application/zip,application/octet-stream,*/*;q=0.8',
+          Accept: 'application/zip,application/gzip,application/x-gzip,application/octet-stream,*/*;q=0.8',
           'Cache-Control': 'no-cache'
         }
       }, (res) => {
@@ -455,6 +469,16 @@ async function findJavaHome(root, depth = 4) {
 }
 
 async function extractJavaArchive(downloadPath, stagingDir) {
+  if (process.platform === 'linux') {
+    // Adoptium publishes Linux runtimes as .tar.gz archives. GNU tar preserves
+    // the executable bit on bin/java, which is required for the managed runtime.
+    await execFilePromise('tar', ['-xzf', downloadPath, '-C', stagingDir], {
+      timeout: 180000,
+      maxBuffer: 8 * 1024 * 1024
+    });
+    return;
+  }
+
   // Windows ships bsdtar on supported Windows 10/11 builds. It handles ZIPs
   // reliably and avoids the Expand-Archive failure seen on some systems.
   try {
@@ -483,17 +507,18 @@ async function extractJavaArchive(downloadPath, stagingDir) {
 async function installManagedJava(major) {
   major = Number(major);
   if (![21, 25].includes(major)) throw new Error(`Unsupported managed Java version: ${major}`);
-  if (process.platform !== 'win32') {
-    throw new Error(`Automatic Java ${major} installation is currently supported on Windows only. Select Java ${major} manually in Settings on this platform.`);
+  if (!['win32', 'linux'].includes(process.platform)) {
+    throw new Error(`Automatic Java ${major} installation is not supported on ${process.platform}. Select Java ${major} manually in Settings.`);
   }
 
   await ensureDirs();
   const arch = temurinArch();
   const runtimeDir = javaRuntimeDir(major);
-  const downloadPath = path.join(JAVA_RUNTIME_DOWNLOAD_DIR, `temurin-${major}-${arch}-${process.pid}.zip`);
+  const archiveExtension = process.platform === 'win32' ? '.zip' : '.tar.gz';
+  const downloadPath = path.join(JAVA_RUNTIME_DOWNLOAD_DIR, `temurin-${major}-${arch}-${process.pid}${archiveExtension}`);
   const stagingDir = path.join(APPDATA_ROOT, 'runtime', `.java-${major}-install-${process.pid}-${Date.now()}`);
 
-  log(`[Java] Resolving verified Eclipse Temurin Java ${major} package for Windows ${arch}…`, 'launcher');
+  log(`[Java] Resolving verified Eclipse Temurin Java ${major} package for ${temurinPlatformLabel()} ${arch}…`, 'launcher');
   send('install-state', { step: `Java ${major}`, message: `Finding Java ${major}…` });
 
   await fsp.rm(downloadPath, { force: true }).catch(() => {});
@@ -542,8 +567,12 @@ async function installManagedJava(major) {
         const header = Buffer.alloc(4);
         await fd.read(header, 0, 4, 0);
         await fd.close();
-        if (header[0] !== 0x50 || header[1] !== 0x4b) {
-          throw new Error(`Verified Java ${major} package is not a ZIP archive.`);
+        if (process.platform === 'win32') {
+          if (header[0] !== 0x50 || header[1] !== 0x4b) {
+            throw new Error(`Verified Java ${major} package is not a ZIP archive.`);
+          }
+        } else if (header[0] !== 0x1f || header[1] !== 0x8b) {
+          throw new Error(`Verified Java ${major} package is not a gzip-compressed tar archive.`);
         }
 
         log(`[Java] Java ${major} package passed size and SHA-256 verification.`, 'launcher');
@@ -553,9 +582,10 @@ async function installManagedJava(major) {
         await extractJavaArchive(downloadPath, stagingDir);
 
         const extractedHome = await findJavaHome(stagingDir);
-        if (!extractedHome) throw new Error(`Java ${major} extracted, but bin\\java.exe could not be found.`);
+        if (!extractedHome) throw new Error(`Java ${major} extracted, but its Java executable could not be found.`);
 
-        const extractedJava = path.join(extractedHome, 'bin', 'java.exe');
+        const extractedJava = path.join(extractedHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+        if (process.platform === 'linux') await fsp.chmod(extractedJava, 0o755).catch(() => {});
         const inspection = await inspectJava(extractedJava, major);
         if (!inspection.ok) {
           throw new Error(`The downloaded Java ${major} runtime failed its JVM test: ${inspection.reason}`);
@@ -573,6 +603,7 @@ async function installManagedJava(major) {
           }
 
           const finalJava = managedJavaPath(major);
+          if (process.platform === 'linux') await fsp.chmod(finalJava, 0o755).catch(() => {});
           const finalInspection = await inspectJava(finalJava, major);
           if (!finalInspection.ok) {
             throw new Error(`Installed Java ${major} failed its final JVM test: ${finalInspection.reason}`);
@@ -923,9 +954,68 @@ function log(line, type = 'launcher') {
 }
 
 
-function showNativeWindowsNotification(title, body, { version = '', kind = 'update' } = {}) {
-  if (process.platform !== 'win32' || !Notification.isSupported()) {
-    log(`[Updater] Windows notification unavailable: ${title} — ${body}`, 'updater');
+
+function isTrustedLauncherWebContents(webContents) {
+  if (!webContents || webContents.isDestroyed?.()) return false;
+  const url = String(webContents.getURL?.() || '');
+  if (!url.startsWith('file://')) return false;
+  const trustedIds = [
+    mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.id : null,
+    logWindow && !logWindow.isDestroyed() ? logWindow.webContents.id : null
+  ].filter(Boolean);
+  return trustedIds.includes(webContents.id);
+}
+
+function configureNotificationPermissions() {
+  // Renderer Notification.requestPermission() is used as the permission request
+  // surface. Only SpectorClient's own local pages may request notification
+  // permission; everything else is denied.
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    const trusted = isTrustedLauncherWebContents(webContents);
+    if (permission === 'notifications') return trusted;
+    // Preserve Electron's previous permissive behavior for SpectorClient's own
+    // local pages while denying permission checks from anything external.
+    return trusted;
+  });
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const trusted = isTrustedLauncherWebContents(webContents);
+    if (permission === 'notifications') {
+      callback(trusted);
+      return;
+    }
+    callback(trusted);
+  });
+}
+
+async function showNotificationPermissionHelp() {
+  if (process.platform !== 'win32') return { openedSettings: false };
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const result = await dialog.showMessageBox(owner, {
+    type: 'warning',
+    title: 'SpectorClient Notifications',
+    message: 'Windows notifications are blocked for SpectorClient.',
+    detail: 'SpectorClient uses Windows notifications when Minecraft starts and when launcher updates are ready or installing. Enable notifications in Windows Settings to receive them.',
+    buttons: ['Open Notification Settings', 'Not Now'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (result.response === 0) {
+    try {
+      await shell.openExternal('ms-settings:notifications');
+      return { openedSettings: true };
+    } catch (error) {
+      log(`[Notifications] Could not open Windows notification settings: ${error?.message || error}`, 'launcher');
+    }
+  }
+  return { openedSettings: false };
+}
+
+
+function showNativeNotification(title, body, { version = '', kind = 'update' } = {}) {
+  if (!Notification.isSupported()) {
+    log(`[Notifications] Desktop notification unavailable on ${process.platform}: ${title} — ${body}`, 'launcher');
     return false;
   }
 
@@ -953,7 +1043,7 @@ function showNativeWindowsNotification(title, body, { version = '', kind = 'upda
     if (kind === 'installing' && version) lastNativeInstallNoticeVersion = version;
     return true;
   } catch (error) {
-    log(`[Updater] Could not show Windows notification: ${error?.message || error}`, 'updater');
+    log(`[Notifications] Could not show desktop notification: ${error?.message || error}`, 'launcher');
     return false;
   }
 }
@@ -975,7 +1065,101 @@ function clearUpdaterPolling() {
   }
 }
 
-function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
+function normalizeLauncherVersion(value) {
+  return String(value || '').trim().replace(/^v/i, '');
+}
+
+function compareLauncherVersions(a, b) {
+  const parse = (value) => normalizeLauncherVersion(value)
+    .split('-')[0]
+    .split('.')
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const av = parse(a);
+  const bv = parse(b);
+  const length = Math.max(av.length, bv.length, 3);
+  for (let i = 0; i < length; i += 1) {
+    const left = av[i] || 0;
+    const right = bv[i] || 0;
+    if (left > right) return 1;
+    if (left < right) return -1;
+  }
+  return 0;
+}
+
+async function getLatestPublishedLauncherVersion() {
+  const url = `https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/latest?ts=${Date.now()}`;
+  const release = await request(url);
+  if (!release || release.draft || release.prerelease) {
+    throw new Error('GitHub did not return a normal published SpectorClient release.');
+  }
+  const version = normalizeLauncherVersion(release.tag_name || release.name);
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version)) {
+    throw new Error(`GitHub returned an invalid launcher version: ${release.tag_name || release.name || 'unknown'}`);
+  }
+  return version;
+}
+
+async function ensurePendingUpdateIsLatest() {
+  const downloadedVersion = normalizeLauncherVersion(downloadedUpdateInfo?.version);
+  if (!downloadedVersion) return true;
+
+  let latestVersion;
+  try {
+    latestVersion = await getLatestPublishedLauncherVersion();
+    latestKnownUpdateVersion = latestVersion;
+  } catch (error) {
+    // If the network disappears after an update was already downloaded, do not
+    // strand the user forever. Install the verified downloaded update and let
+    // the next normal startup check catch anything newer.
+    log(`[Updater] Could not verify the newest published version before install: ${error?.message || error}. Installing the already-downloaded update.`, 'updater');
+    return true;
+  }
+
+  if (compareLauncherVersions(latestVersion, downloadedVersion) <= 0) {
+    log(`[Updater] Confirmed ${downloadedVersion} is the newest published SpectorClient release.`, 'updater');
+    return true;
+  }
+
+  log(`[Updater] Skipping intermediate update ${downloadedVersion}; SpectorClient ${latestVersion} is already available. Downloading the newest release instead…`, 'updater');
+  emitUpdateState('refreshing-latest', {
+    version: latestVersion,
+    text: `A newer SpectorClient ${latestVersion} release is available. Jumping directly to the latest version…`
+  });
+
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const resolvedVersion = normalizeLauncherVersion(result?.updateInfo?.version);
+
+    // GitHub's updater metadata can trail the Releases API for a few seconds.
+    // Never install the intermediate build while that happens; wait and retry.
+    if (!resolvedVersion || compareLauncherVersions(resolvedVersion, latestVersion) < 0) {
+      if (result?.downloadPromise) {
+        try { await result.downloadPromise; } catch {}
+      }
+      log(`[Updater] Update metadata has not caught up to ${latestVersion} yet. Retrying instead of installing ${downloadedVersion}.`, 'updater');
+      setTimeout(() => installDownloadedUpdateWhenSafe('waiting for newest release metadata'), 5000).unref?.();
+      return false;
+    }
+
+    if (result?.downloadPromise) await result.downloadPromise;
+
+    const refreshedVersion = normalizeLauncherVersion(downloadedUpdateInfo?.version);
+    if (compareLauncherVersions(refreshedVersion, latestVersion) >= 0) {
+      log(`[Updater] Newest release ${refreshedVersion} is downloaded and ready to install.`, 'updater');
+      return true;
+    }
+
+    // The download event may still be finalizing its state after the promise.
+    setTimeout(() => installDownloadedUpdateWhenSafe('newest release download finalized'), 750).unref?.();
+    return false;
+  } catch (error) {
+    log(`[Updater] Could not refresh to newest release ${latestVersion}: ${error?.message || error}. Retrying without installing the intermediate update.`, 'updater');
+    setTimeout(() => installDownloadedUpdateWhenSafe('retry newest release'), 5000).unref?.();
+    return false;
+  }
+}
+
+async function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
   if (!updateInstallPending || updateInstallStarting || !app.isPackaged) return false;
 
   const version = downloadedUpdateInfo?.version || 'new version';
@@ -988,30 +1172,52 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
     return false;
   }
 
+  // Do not install a previously downloaded intermediate release. Right before
+  // handing off to the platform updater, verify GitHub's newest published release and jump
+  // straight to it if anything newer has appeared.
+  if (!updateInstallFreshnessPromise) {
+    updateInstallFreshnessPromise = ensurePendingUpdateIsLatest().finally(() => {
+      updateInstallFreshnessPromise = null;
+    });
+  }
+  const newestReady = await updateInstallFreshnessPromise;
+  if (!newestReady) return false;
+  // update-downloaded can fire while the freshness check is awaiting the newer
+  // download. Multiple callers may therefore resume together; only the first
+  // one is allowed to hand off to the platform updater.
+  if (updateInstallStarting || !updateInstallPending) return false;
+
+  // The freshness check can take long enough for Minecraft to start again.
+  if (isMinecraftRunning() || gameLaunchInProgress || updateDownloadInProgress) {
+    log('[Updater] Newest update is not safe to install yet. Waiting for active launch/download work to finish.', 'updater');
+    return false;
+  }
+
+  const finalVersion = downloadedUpdateInfo?.version || version;
   updateInstallStarting = true;
   clearUpdaterPolling();
-  log(`[Updater] Installing SpectorClient ${version} now (${reason})…`, 'updater');
-  showNativeWindowsNotification(
+  log(`[Updater] Installing newest SpectorClient ${finalVersion} now (${reason})…`, 'updater');
+  showNativeNotification(
     'SpectorClient Update Installing',
-    `Installing SpectorClient ${version} now. The launcher will restart automatically when it is finished.`,
-    { version, kind: 'installing' }
+    `Installing SpectorClient ${finalVersion} now. The launcher will restart automatically when it is finished.`,
+    { version: finalVersion, kind: 'installing' }
   );
   emitUpdateState('installing-update', {
-    version,
-    text: `Installing SpectorClient ${version} now…`
+    version: finalVersion,
+    text: `Installing SpectorClient ${finalVersion} now…`
   });
 
   // Give the renderer/log window a brief moment to paint the final status.
-  // Then close every BrowserWindow ourselves before handing control to NSIS.
-  // This avoids renderer/GPU handles keeping files locked during replacement.
+  // Then close every BrowserWindow ourselves before handing control to the
+  // platform updater. This avoids renderer/GPU handles keeping files locked.
   setTimeout(() => {
     try {
       if (logWindow && !logWindow.isDestroyed()) logWindow.destroy();
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
       app.releaseSingleInstanceLock();
 
-      // isSilent=true: no installer wizard. forceRunAfter=true: restart the
-      // updated launcher once NSIS has replaced the installed application.
+      // isSilent=true: no installer wizard where supported. forceRunAfter=true:
+      // restart the updated launcher after NSIS/AppImage replacement completes.
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
       updateInstallStarting = false;
@@ -1027,11 +1233,10 @@ function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
 }
 
 
-
 function normalizeUpdaterError(error) {
   const raw = error?.message || String(error || 'Unknown updater error');
   const firstLine = raw.split(/\r?\n/)[0].trim();
-  const missingLatestMetadata = /latest\.yml/i.test(raw) && (/(?:404|not found)/i.test(raw) || /cannot find latest\.yml/i.test(raw));
+  const missingLatestMetadata = /latest(?:-linux)?\.yml/i.test(raw) && (/(?:404|not found)/i.test(raw) || /cannot find latest(?:-linux)?\.yml/i.test(raw));
   const rateLimited = /(?:rate limit|403)/i.test(raw) && /github/i.test(raw);
   const networkIssue = /(?:ENOTFOUND|ECONNRESET|ETIMEDOUT|network|socket hang up)/i.test(raw);
 
@@ -1103,8 +1308,24 @@ function verifyPackagedUpdateConfig() {
 
 function setupAutoUpdater() {
   if (updaterInitialized || !app.isPackaged) {
-    if (!app.isPackaged) log(`[Updater] Development build ${app.getVersion()} detected; automatic app replacement is disabled. Install the NSIS EXE to test auto-updates.`, 'updater');
+    if (!app.isPackaged) log(`[Updater] Development build ${app.getVersion()} detected; automatic app replacement is disabled. Install the Windows NSIS build or run the Linux AppImage to test auto-updates.`, 'updater');
     return;
+  }
+
+  if (process.platform === 'linux') {
+    if (!process.env.APPIMAGE) {
+      log('[Updater] Packaged Linux build is not running from an AppImage. Automatic in-place updates are disabled for this launch.', 'updater');
+      return;
+    }
+    try {
+      // AppImageUpdater replaces/renames the current AppImage. The containing
+      // directory therefore must be writable by the current user.
+      fs.accessSync(path.dirname(process.env.APPIMAGE), fs.constants.W_OK);
+    } catch {
+      log(`[Updater] Linux AppImage directory is not writable: ${path.dirname(process.env.APPIMAGE)}. Move SpectorClient to a user-writable folder to enable automatic updates.`, 'updater');
+      emitUpdateState('error', { text: 'Linux auto-update needs the SpectorClient AppImage to be in a writable folder.' });
+      return;
+    }
   }
 
   updaterInitialized = true;
@@ -1125,8 +1346,8 @@ function setupAutoUpdater() {
   log(`[Updater] Update source: ${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}.`, 'updater');
 
   autoUpdater.autoDownload = true;
-  // Reliability over bandwidth: always download the complete NSIS installer.
-  // This removes differential/blockmap patching as a possible failure point.
+  // Reliability over bandwidth: always download the complete platform package
+  // (NSIS on Windows, AppImage on Linux) instead of relying on differential patches.
   autoUpdater.disableDifferentialDownload = true;
   autoUpdater.allowDowngrade = false;
   // We intentionally control installation ourselves. This prevents an update
@@ -1147,7 +1368,7 @@ function setupAutoUpdater() {
     const updateNoticeBody = (isMinecraftRunning() || gameLaunchInProgress)
       ? `SpectorClient ${info.version} is downloading now and will install automatically after Minecraft closes.`
       : `SpectorClient ${info.version} is downloading automatically.`;
-    showNativeWindowsNotification(
+    showNativeNotification(
       'SpectorClient Update Available',
       updateNoticeBody,
       { version: info.version, kind: 'available' }
@@ -1937,6 +2158,7 @@ ipcMain.handle('account:skin-data', async (_event, accountId) => {
 
 ipcMain.handle('client:info', async () => ({
   productName: PRODUCT_NAME,
+  platform: process.platform,
   gameDirectory: APPDATA_ROOT,
   defaultGameVersion: DEFAULT_GAME_VERSION,
   supportedVersions: Object.keys(CLIENT_PROFILES).map((gameVersion) => ({
@@ -2168,6 +2390,11 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     activeGameVersion = selectedGameVersion;
     gameLaunchInProgress = false;
     send('game-state', { state: 'running', text: `SpectorClient ${selectedGameVersion} is running.`, gameVersion: selectedGameVersion });
+    showNativeNotification(
+      'Minecraft Started',
+      `SpectorClient ${selectedGameVersion} has started successfully.`,
+      { version: selectedGameVersion, kind: 'game-started' }
+    );
     if (merged.closeLauncherOnStart && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
 
     child.once('exit', (code) => {
@@ -2205,6 +2432,16 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
   }
 });
 
+ipcMain.handle('notifications:permission-help', async () => {
+  return showNotificationPermissionHelp();
+});
+
+ipcMain.handle('notifications:status', async () => ({
+  supported: Notification.isSupported(),
+  platform: process.platform,
+  appId: process.platform === 'win32' ? WINDOWS_APP_ID : null
+}));
+
 ipcMain.handle('updater:check', async () => {
   if (!app.isPackaged) return { ok: false, development: true };
   if (updateInstallPending || updateInstallStarting) {
@@ -2232,7 +2469,11 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
   app.setName(PRODUCT_NAME);
-  if (process.platform === 'win32') app.setAppUserModelId('client.spector.launcher');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(WINDOWS_APP_ID);
+    if (typeof app.setToastActivatorCLSID === 'function') app.setToastActivatorCLSID(WINDOWS_TOAST_CLSID);
+  }
+  configureNotificationPermissions();
   await ensureDirs();
   createWindow();
   setupAutoUpdater();
