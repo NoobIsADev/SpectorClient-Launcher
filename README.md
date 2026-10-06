@@ -1,6 +1,6 @@
-# SpectorClient Launcher v1.6.20
+# SpectorClient Launcher v1.6.21
 
-## Windows + Linux support (v1.6.20)
+## Windows + Linux support (v1.6.21)
 
 SpectorClient now ships as a **Windows NSIS installer** and a **Linux x64 AppImage** from the same GitHub Release. The Linux AppImage keeps the same launcher UI and feature set: Microsoft sign-in, SpectorClient 26.2/1.21.11 selection, isolated instances/mod folders, Modrinth manager, dependency installs, themes, logs/filters, sounds, 3D skin viewer, managed Java 25/21, native desktop notifications, Play/Stop, SpectorClient mod updating, and direct-to-latest launcher auto-update.
 
@@ -29,10 +29,10 @@ SpectorClient 26.2 uses Java 25 and SpectorClient 1.21.11 uses Java 21. On both 
 
 ### Cross-platform GitHub release
 
-Pushing a version tag matching `package.json` (for example `v1.6.20`) now runs two builders in GitHub Actions:
+Pushing a version tag matching `package.json` (for example `v1.6.21`) now runs two builders in GitHub Actions:
 
-- `windows-latest` → `SpectorClient-1.6.20-x64.exe`, blockmap, `latest.yml`
-- `ubuntu-latest` → `SpectorClient-1.6.20-x64.AppImage`, `latest-linux.yml`
+- `windows-latest` → `SpectorClient-1.6.21-x64.exe`, blockmap, `latest.yml`
+- `ubuntu-latest` → `SpectorClient-1.6.21-x86_64.AppImage`, `latest-linux.yml`
 
 A final publish job waits for both builds, verifies all five updater assets, uploads them to one draft GitHub Release, then publishes it only after the cross-platform release set is complete.
 
@@ -40,7 +40,7 @@ A final publish job waits for both builds, verifies all five updater assets, upl
 
 On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/tag and waits until the combined Windows + Linux GitHub Actions release succeeds, then verifies both platform updater files are present.
 
-## What changed in v1.6.20
+## What changed in v1.6.21
 
 - Added Linux x64 AppImage packaging with automatic GitHub Release updates.
 - Added Linux `latest-linux.yml` generation and release verification.

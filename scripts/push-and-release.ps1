@@ -128,7 +128,7 @@ try {
             "SpectorClient-$Version-x64.exe",
             "SpectorClient-$Version-x64.exe.blockmap",
             'latest.yml',
-            "SpectorClient-$Version-x64.AppImage",
+            "SpectorClient-$Version-x86_64.AppImage",
             'latest-linux.yml'
         )
         $ActualAssets = @($Release.assets | ForEach-Object { $_.name })

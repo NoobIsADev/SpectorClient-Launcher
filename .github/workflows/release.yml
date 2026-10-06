@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          appimage="dist/SpectorClient-${version}-x64.AppImage"
+          appimage="dist/SpectorClient-${version}-x86_64.AppImage"
           metadata="dist/latest-linux.yml"
           test -s "$appimage" || { echo "Missing/empty $appimage"; exit 1; }
           test -s "$metadata" || { echo "Missing/empty $metadata"; exit 1; }
@@ -140,7 +140,7 @@ jobs:
           if (!new RegExp(`^version:\\s*${version.replace(/\\./g, '\\\\.')}\\s*$`, 'm').test(metadata)) {
             throw new Error(`latest-linux.yml does not advertise ${version}`);
           }
-          const expectedName = `SpectorClient-${version}-x64.AppImage`;
+          const expectedName = `SpectorClient-${version}-x86_64.AppImage`;
           if (!metadata.includes(expectedName)) throw new Error('latest-linux.yml points to the wrong AppImage');
           const match = metadata.match(/^\s*sha512:\s*([^\r\n]+)/m);
           if (!match) throw new Error('latest-linux.yml does not contain sha512');
@@ -156,7 +156,7 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           path: |
-            dist/SpectorClient-*-x64.AppImage
+            dist/SpectorClient-*-x86_64.AppImage
             dist/latest-linux.yml
 
   publish-release:
@@ -185,7 +185,7 @@ jobs:
             "dist/SpectorClient-${version}-x64.exe"
             "dist/SpectorClient-${version}-x64.exe.blockmap"
             "dist/latest.yml"
-            "dist/SpectorClient-${version}-x64.AppImage"
+            "dist/SpectorClient-${version}-x86_64.AppImage"
             "dist/latest-linux.yml"
           )
           for file in "${expected[@]}"; do
@@ -229,7 +229,7 @@ jobs:
             "dist/SpectorClient-${version}-x64.exe" \
             "dist/SpectorClient-${version}-x64.exe.blockmap" \
             "dist/latest.yml" \
-            "dist/SpectorClient-${version}-x64.AppImage" \
+            "dist/SpectorClient-${version}-x86_64.AppImage" \
             "dist/latest-linux.yml" \
             --clobber
 
@@ -251,7 +251,7 @@ jobs:
             `SpectorClient-${v}-x64.exe`,
             `SpectorClient-${v}-x64.exe.blockmap`,
             'latest.yml',
-            `SpectorClient-${v}-x64.AppImage`,
+            `SpectorClient-${v}-x86_64.AppImage`,
             'latest-linux.yml'
           ];
           const assets = new Map((release.assets || []).map(a => [a.name, a]));
@@ -286,12 +286,12 @@ jobs:
           grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest.yml"
           grep -Fq "SpectorClient-${version}-x64.exe" "$verify_dir/latest.yml"
           grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest-linux.yml"
-          grep -Fq "SpectorClient-${version}-x64.AppImage" "$verify_dir/latest-linux.yml"
+          grep -Fq "SpectorClient-${version}-x86_64.AppImage" "$verify_dir/latest-linux.yml"
 
           curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
             "$base/SpectorClient-${version}-x64.exe" >/dev/null
           curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
-            "$base/SpectorClient-${version}-x64.AppImage" >/dev/null
+            "$base/SpectorClient-${version}-x86_64.AppImage" >/dev/null
 
           latest_ok=0
           last_seen=''
