@@ -2,7 +2,7 @@
 
 ## Windows + Linux support (v1.6.21)
 
-SpectorClient now ships as a **Windows NSIS installer** and a **Linux x64 AppImage** from the same GitHub Release. The Linux AppImage keeps the same launcher UI and feature set: Microsoft sign-in, SpectorClient 26.2/1.21.11 selection, isolated instances/mod folders, Modrinth manager, dependency installs, themes, logs/filters, sounds, 3D skin viewer, managed Java 25/21, native desktop notifications, Play/Stop, SpectorClient mod updating, and direct-to-latest launcher auto-update.
+SpectorClient now ships as a **Windows NSIS installer** and a **Linux x64 AppImage** from the same GitHub Release. The Linux AppImage keeps the same launcher UI and feature set: Microsoft sign-in, SpectorClient 26.2/26.3/1.21.11 selection, isolated instances/mod folders, Modrinth manager, dependency installs, themes, logs/filters, sounds, 3D skin viewer, managed Java 25/21, native desktop notifications, Play/Stop, SpectorClient mod updating, and direct-to-latest launcher auto-update.
 
 Launcher/game data is stored separately from the application:
 
@@ -25,7 +25,7 @@ Linux auto-update requires running the distributed `.AppImage` file itself; an e
 
 ### Managed Java on both platforms
 
-SpectorClient 26.2 uses Java 25 and SpectorClient 1.21.11 uses Java 21. On both Windows and Linux the launcher resolves Eclipse Temurin from Adoptium, checks the advertised package size and SHA-256, extracts it, validates the reported major version, and performs a JVM smoke test before accepting the runtime.
+SpectorClient 26.2 and 26.3 use Java 25, and SpectorClient 1.21.11 uses Java 21. On both Windows and Linux the launcher resolves Eclipse Temurin from Adoptium, checks the advertised package size and SHA-256, extracts it, validates the reported major version, and performs a JVM smoke test before accepting the runtime.
 
 ### Cross-platform GitHub release
 
@@ -61,19 +61,22 @@ On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/
 ## What changed in v1.6.15
 
 - Clicking the version button on Home now opens a dedicated SpectorClient version selector.
-- Added **SpectorClient 26.2** and **SpectorClient 1.21.11** launch targets.
+- Added **SpectorClient 26.2**, **SpectorClient 26.3**, and **SpectorClient 1.21.11** launch targets.
 - The selected launch version is saved in launcher settings and shown on the Play screen.
 - 26.2 now uses `%APPDATA%\spectorclient\instances\26.2\mods`; existing legacy 26.2 instance data is migrated there automatically and the old root instance files are removed after a successful move.
+- 26.3 uses `%APPDATA%\spectorclient\instances\26.3\mods`.
 - 1.21.11 uses `%APPDATA%\spectorclient\instances\1.21.11\mods`.
 - The Mods page always asks which client version to manage before showing Install Mods / Installed.
 - Modrinth search, installed-state tracking, dependencies, updates, removal, Fabric API and the mods-folder button are isolated per selected version.
 - SpectorClient 26.2 downloads its core mod from `https://spectorclient.com/mod/download`.
+- 26.3 uses its own isolated instance and Modrinth registry, and shares the verified managed Java 25 runtime with 26.2.
+- SpectorClient 26.3 downloads its core mod from `https://spectorclient.com/mod/download/26.3`.
 - SpectorClient 1.21.11 downloads its core mod from `https://spectorclient.com/mod/download/1.21.11`.
 
 ## What changed in v1.6.13
 
 - Removed the Home-screen **Check files** status row and button entirely. Client preparation still happens automatically when you press **Play**.
-- Removed the **26.2 • FABRIC** label from the top title bar. The launcher now supports selectable 26.2 and 1.21.11 Fabric clients.
+- Removed the **26.2 • FABRIC** label from the top title bar. The launcher now supports selectable 26.2, 26.3 and 1.21.11 Fabric clients.
 - Added **Settings → Launcher theme** with three live-preview themes:
   - **Classic** — the existing light-blue cave style
   - **Crimson** — red cave/crystal accents
@@ -86,13 +89,13 @@ On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/
 
 - Fixed the Windows build version to valid SemVer `1.3.6` (electron-builder rejects four-part versions such as `1.3.5.1`).
 
-- Modrinth cards now compare the installed Modrinth version ID with the newest compatible Fabric 26.2 version.
+- Modrinth cards now compare the installed Modrinth version ID with the newest compatible Fabric version for the selected Minecraft client.
 - If a mod is already current, its action button is gray, disabled, and says **Installed**.
 - If a newer compatible version exists, the same button becomes an enabled **Update** button.
 - The Installed-mods list also disables the update control and shows **Installed** when no update exists.
 - Fabric API is checked quietly on every launcher startup, before every normal client preparation, and before every Modrinth install/update.
 - Fabric API now tracks the exact Modrinth version ID and file size, so a stale JAR cannot be treated as current just because a file with the expected name exists.
-- Fabric API always targets the newest Fabric + Minecraft 26.2-compatible build returned by Modrinth.
+- Fabric API always targets the newest Fabric build compatible with the selected Minecraft version returned by Modrinth.
 
 ## What changed in v1.3.4
 
@@ -146,7 +149,7 @@ On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/
 
 - Windows 10/11 recommended
 - Node.js 22+
-- Java 25 for Minecraft 26.2
+- Java 25 for Minecraft 26.2 and 26.3
 - Java 21 for Minecraft 1.21.11
 - A Microsoft account that owns Minecraft Java Edition
 - Internet connection for Microsoft authentication, Minecraft/Fabric assets, Modrinth, SpectorClient updates and initial logo download
@@ -184,7 +187,7 @@ Open **Accounts** and choose **Add Microsoft account**. Authentication uses the 
 
 Before every launch, SpectorClient prepares:
 
-1. Minecraft Java **26.2**
+1. Minecraft Java **26.2**, **26.3**, or **1.21.11**
 2. Compatible **Fabric Loader** profile
 3. Compatible **Fabric API** from Modrinth
 4. A fresh copy of **SpectorClient** from `https://spectorclient.com/mod/download`
@@ -192,7 +195,7 @@ Before every launch, SpectorClient prepares:
 The SpectorClient JAR is stored as:
 
 ```text
-%APPDATA%\spectorclient\instances\26.2\mods\spectorclient.jar
+%APPDATA%\spectorclient\instances\<version>\mods\spectorclient.jar
 ```
 
 The updater only removes these SpectorClient-owned filenames:
@@ -210,10 +213,11 @@ The Mods tab manages JARs in the selected version's dedicated folder, for exampl
 
 ```text
 %APPDATA%\spectorclient\instances\26.2\mods
+%APPDATA%\spectorclient\instances\26.3\mods
 %APPDATA%\spectorclient\instances\1.21.11\mods
 ```
 
-It can search Modrinth for **Fabric + Minecraft 26.2** mods across multiple pages, install or update compatible versions, recursively install required Modrinth dependencies, remove user-installed mods, and open the mods folder. Fabric API and the SpectorClient JAR are marked as required core files.
+It can search Modrinth for **Fabric + the selected Minecraft version** across multiple pages, install or update compatible versions, recursively install required Modrinth dependencies, remove user-installed mods, and open the mods folder. Fabric API and the SpectorClient JAR are marked as required core files.
 
 ## Launcher appearance
 
@@ -306,7 +310,7 @@ The SpectorClient logo is center-zoomed by 10% during asset preparation. The sam
 
 ## Automatic Java runtimes
 
-SpectorClient 26.2 uses managed Eclipse Temurin Java 25 under `%APPDATA%\spectorclient\runtime\java-25`, while SpectorClient 1.21.11 uses managed Java 21 under `%APPDATA%\spectorclient\runtime\java-21`. Downloads are resolved through the Adoptium API, verified against Adoptium's package size and SHA-256 checksum, extracted, and then smoke-tested before use. If a JRE package is unavailable, the launcher falls back to the matching JDK package.
+SpectorClient 26.2 and 26.3 use managed Eclipse Temurin Java 25 under `%APPDATA%\spectorclient\runtime\java-25`, while SpectorClient 1.21.11 uses managed Java 21 under `%APPDATA%\spectorclient\runtime\java-21`. Downloads are resolved through the Adoptium API, verified against Adoptium's package size and SHA-256 checksum, extracted, and then smoke-tested before use. If a JRE package is unavailable, the launcher falls back to the matching JDK package.
 
 
 ## Microsoft sign-in convenience

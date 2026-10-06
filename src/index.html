@@ -122,6 +122,17 @@
             <span class="version-card-action">Select →</span>
           </button>
 
+          <button class="client-version-card" data-game-version="26.3">
+            <div class="client-version-icon">26</div>
+            <div class="client-version-copy">
+              <span class="version-card-kicker">SPECTORCLIENT</span>
+              <h3>26.3</h3>
+              <p>Fabric • Dedicated instance and mods</p>
+              <code id="versionModsPath263">SpectorClient data/instances/26.3/mods</code>
+            </div>
+            <span class="version-card-action">Select →</span>
+          </button>
+
           <button class="client-version-card" data-game-version="1.21.11">
             <div class="client-version-icon">1.21</div>
             <div class="client-version-copy">
@@ -149,12 +160,16 @@
           <div class="mod-version-heading">
             <span class="version-card-kicker">CHOOSE VERSION</span>
             <h3>Which SpectorClient mods do you want to manage?</h3>
-            <p>Mods installed for one version never appear in the other version.</p>
+            <p>Each SpectorClient version has its own isolated mods folder.</p>
           </div>
           <div class="mod-version-grid">
             <button class="mod-version-card" data-mod-game-version="26.2">
               <b>SpectorClient 26.2</b>
               <span id="modChooserPath26">Fabric • SpectorClient data/instances/26.2/mods</span>
+            </button>
+            <button class="mod-version-card" data-mod-game-version="26.3">
+              <b>SpectorClient 26.3</b>
+              <span id="modChooserPath263">Fabric • SpectorClient data/instances/26.3/mods</span>
             </button>
             <button class="mod-version-card" data-mod-game-version="1.21.11">
               <b>SpectorClient 1.21.11</b>
@@ -188,7 +203,7 @@
               <div><h3>Browse Modrinth</h3><span id="modBrowseSubtitle">Fabric-compatible mods</span></div>
             </div>
             <div id="modSearchResults" class="mod-results">
-              <div class="empty-state compact-empty"><b>Select a version</b><span>Choose 26.2 or 1.21.11 to browse compatible mods.</span></div>
+              <div class="empty-state compact-empty"><b>Select a version</b><span>Choose 26.2, 26.3, or 1.21.11 to browse compatible mods.</span></div>
             </div>
             <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
           </div>
@@ -296,9 +311,9 @@
 
           <div class="setting-card full-card">
             <h3>Java runtimes</h3>
-            <label>Java 25 executable — SpectorClient 26.2</label>
+            <label>Java 25 executable — SpectorClient 26.2 / 26.3</label>
             <div class="field-action"><input id="java25Path" placeholder="Automatic: managed Java 25" /><button id="chooseJava25Btn" class="secondary-btn">Browse</button></div>
-            <p class="hint">26.2 automatically uses a verified SpectorClient-managed Java 25 runtime. Leave this blank unless you want to override it.</p>
+            <p class="hint">26.2 and 26.3 automatically use the verified SpectorClient-managed Java 25 runtime. Leave this blank unless you want to override it.</p>
             <label style="margin-top:14px;display:block">Java 21 executable — SpectorClient 1.21.11</label>
             <div class="field-action"><input id="java21Path" placeholder="Automatic: managed Java 21" /><button id="chooseJava21Btn" class="secondary-btn">Browse</button></div>
             <p class="hint">1.21.11 automatically downloads and uses a separate verified Java 21 runtime.</p>
@@ -356,7 +371,7 @@
       <section class="right-panel news-panel">
         <div class="right-panel-head"><span>NEWS</span><button id="newsHomeBtn" class="mini-link">HOME</button></div>
         <div class="news-list">
-          <article><span class="news-tag">CLIENT</span><h3>Multiple client versions</h3><p>Launch SpectorClient 26.2 or SpectorClient 1.21.11 with isolated mods.</p></article>
+          <article><span class="news-tag">CLIENT</span><h3>Multiple client versions</h3><p>Launch SpectorClient 26.2, SpectorClient 26.3, or SpectorClient 1.21.11 with isolated mods.</p></article>
           <article><span class="news-tag">NEW</span><h3>Version-aware Modrinth</h3><p>Choose a client version before browsing or managing compatible Fabric mods.</p></article>
           <article><span class="news-tag">FILES</span><h3>Separate instance</h3><p>Your normal <code>.minecraft</code> folder stays untouched.</p></article>
         </div>

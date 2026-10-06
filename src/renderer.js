@@ -200,8 +200,8 @@ function formatDownloads(value) {
 function supportedGameVersions() {
   const values = Array.isArray(clientInfo?.supportedVersions)
     ? clientInfo.supportedVersions.map((entry) => String(entry.gameVersion || '')).filter(Boolean)
-    : ['26.2', '1.21.11'];
-  return values.length ? values : ['26.2', '1.21.11'];
+    : ['26.2', '26.3', '1.21.11'];
+  return values.length ? values : ['26.2', '26.3', '1.21.11'];
 }
 
 function normalizeGameVersion(value) {
@@ -513,10 +513,13 @@ function renderPlatformPaths() {
   const versions = Array.isArray(clientInfo?.supportedVersions) ? clientInfo.supportedVersions : [];
   const byVersion = Object.fromEntries(versions.map((entry) => [String(entry.gameVersion || ''), entry]));
   const path26 = byVersion['26.2']?.modsDirectory || 'SpectorClient data/instances/26.2/mods';
+  const path263 = byVersion['26.3']?.modsDirectory || 'SpectorClient data/instances/26.3/mods';
   const path12111 = byVersion['1.21.11']?.modsDirectory || 'SpectorClient data/instances/1.21.11/mods';
   if ($('versionModsPath26')) $('versionModsPath26').textContent = path26;
+  if ($('versionModsPath263')) $('versionModsPath263').textContent = path263;
   if ($('versionModsPath12111')) $('versionModsPath12111').textContent = path12111;
   if ($('modChooserPath26')) $('modChooserPath26').textContent = `Fabric • ${path26}`;
+  if ($('modChooserPath263')) $('modChooserPath263').textContent = `Fabric • ${path263}`;
   if ($('modChooserPath12111')) $('modChooserPath12111').textContent = `Fabric • ${path12111}`;
 }
 

@@ -23,6 +23,7 @@ const WINDOWS_TOAST_CLSID = '{7C0F70F8-9A1B-4A7E-8C1E-7D2AF30F6C91}';
 const DEFAULT_GAME_VERSION = '26.2';
 const CLIENT_PROFILES = Object.freeze({
   '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download', javaMajor: 25 },
+  '26.3': { label: 'SpectorClient 26.3', modUrl: 'https://spectorclient.com/mod/download/26.3', javaMajor: 25 },
   '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11', javaMajor: 21 }
 });
 const SPECTOR_MOD_FILENAME = 'spectorclient.jar';
@@ -2478,8 +2479,8 @@ app.whenReady().then(async () => {
   createWindow();
   setupAutoUpdater();
 
-  // Warm up Java 25 for the default 26.2 client. Java 21 is installed
-  // automatically when the user launches SpectorClient 1.21.11.
+  // Warm up Java 25 for the default 26.2 client. SpectorClient 26.3 also
+  // uses Java 25; Java 21 is installed automatically for SpectorClient 1.21.11.
   setTimeout(() => {
     ensureManagedJava(25).catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
   }, 450);
