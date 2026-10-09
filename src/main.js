@@ -137,7 +137,7 @@ function defaultSettings() {
 }
 
 const LEGACY_26_2_MIGRATION_MARKER = launcherDataPath('migration-26.2-to-instances-v1.json');
-const SHARED_INSTANCE_DIRECTORIES = Object.freeze(['config', 'spectorclient']);
+const SHARED_INSTANCE_DIRECTORIES = Object.freeze(['config', 'spectorclient', 'resourcepacks', 'shaderpacks']);
 const SHARED_INSTANCE_FILES = Object.freeze(['options.txt', 'servers.dat', 'servers.dat_old']);
 const SHARED_INSTANCE_ENTRIES = Object.freeze([...SHARED_INSTANCE_DIRECTORIES, ...SHARED_INSTANCE_FILES]);
 const LEGACY_26_2_EXCLUDED_ROOT_ENTRIES = new Set(['launcher-data', 'runtime', 'instances', ...SHARED_INSTANCE_ENTRIES]);
@@ -388,7 +388,8 @@ async function ensureSharedDataForVersion(gameVersion) {
 
 async function ensureSharedInstanceData() {
   // These live directly in the main SpectorClient directory and are presented
-  // inside every version instance. Mods remain version-specific.
+  // inside every version instance. Config, SpectorClient data, resource packs and
+  // shader packs are shared; mods remain version-specific.
   for (const gameVersion of Object.keys(CLIENT_PROFILES)) {
     await ensureSharedDataForVersion(gameVersion);
   }

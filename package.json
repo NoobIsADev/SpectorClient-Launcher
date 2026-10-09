@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.23",
-  "description": "SpectorClient Electron launcher for Windows and Linux with selectable Minecraft 26.2, 26.3 and 1.21.11 Fabric clients, isolated instances, managed Java 25/21, native desktop notifications, and automatic direct-to-latest updates",
+  "version": "1.6.24",
+  "description": "SpectorClient Electron launcher for Windows and Linux with selectable Minecraft 26.2, 26.3 and 1.21.11 Fabric clients, isolated mods, shared client settings/resource packs/shader packs, managed Java 25/21, native desktop notifications, and automatic direct-to-latest updates",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
