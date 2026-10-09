@@ -1,6 +1,6 @@
-# SpectorClient Launcher v1.6.21
+# SpectorClient Launcher v1.6.23
 
-## Windows + Linux support (v1.6.21)
+## Windows + Linux support (v1.6.23)
 
 SpectorClient now ships as a **Windows NSIS installer** and a **Linux x64 AppImage** from the same GitHub Release. The Linux AppImage keeps the same launcher UI and feature set: Microsoft sign-in, SpectorClient 26.2/26.3/1.21.11 selection, isolated instances/mod folders, Modrinth manager, dependency installs, themes, logs/filters, sounds, 3D skin viewer, managed Java 25/21, native desktop notifications, Play/Stop, SpectorClient mod updating, and direct-to-latest launcher auto-update.
 
@@ -29,16 +29,25 @@ SpectorClient 26.2 and 26.3 use Java 25, and SpectorClient 1.21.11 uses Java 21.
 
 ### Cross-platform GitHub release
 
-Pushing a version tag matching `package.json` (for example `v1.6.21`) now runs two builders in GitHub Actions:
+Pushing a version tag matching `package.json` (for example `v1.6.23`) now runs two builders in GitHub Actions:
 
-- `windows-latest` → `SpectorClient-1.6.21-x64.exe`, blockmap, `latest.yml`
-- `ubuntu-latest` → `SpectorClient-1.6.21-x86_64.AppImage`, `latest-linux.yml`
+- `windows-latest` → `SpectorClient-1.6.23-x64.exe`, blockmap, `latest.yml`
+- `ubuntu-latest` → `SpectorClient-1.6.23-x86_64.AppImage`, `latest-linux.yml`
 
 A final publish job waits for both builds, verifies all five updater assets, uploads them to one draft GitHub Release, then publishes it only after the cross-platform release set is complete.
 
 ### Publishing
 
 On Windows, double-click `PUSH-AND-RELEASE.bat` as before. It pushes the source/tag and waits until the combined Windows + Linux GitHub Actions release succeeds, then verifies both platform updater files are present.
+
+## What changed in v1.6.23
+
+- Mods remain completely separate for 26.2, 26.3, and 1.21.11 under each version's `instances/<version>/mods` directory.
+- `config/`, `options.txt`, the SpectorClient mod's `spectorclient/` data folder, `servers.dat`, and `servers.dat_old` are now shared between every client version.
+- Shared data lives directly in the main SpectorClient data directory (`%APPDATA%\spectorclient` on Windows or the SpectorClient config directory on Linux).
+- Existing per-version copies are migrated into the shared location. When files conflict, the newest file is kept and the older/conflicting copy is preserved under `launcher-data/shared-data-migration-backups` before linking the instances.
+- Windows uses directory junctions plus hard links for the shared data, avoiding Developer Mode/admin requirements. Linux uses symbolic links.
+- Shared file links are reconciled immediately before launch and again after Minecraft exits, covering games that replace `options.txt`/`servers.dat` atomically while saving.
 
 ## What changed in v1.6.21
 

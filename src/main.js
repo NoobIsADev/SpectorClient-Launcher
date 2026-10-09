@@ -137,7 +137,12 @@ function defaultSettings() {
 }
 
 const LEGACY_26_2_MIGRATION_MARKER = launcherDataPath('migration-26.2-to-instances-v1.json');
-const LEGACY_26_2_EXCLUDED_ROOT_ENTRIES = new Set(['launcher-data', 'runtime', 'instances']);
+const SHARED_INSTANCE_DIRECTORIES = Object.freeze(['config', 'spectorclient']);
+const SHARED_INSTANCE_FILES = Object.freeze(['options.txt', 'servers.dat', 'servers.dat_old']);
+const SHARED_INSTANCE_ENTRIES = Object.freeze([...SHARED_INSTANCE_DIRECTORIES, ...SHARED_INSTANCE_FILES]);
+const LEGACY_26_2_EXCLUDED_ROOT_ENTRIES = new Set(['launcher-data', 'runtime', 'instances', ...SHARED_INSTANCE_ENTRIES]);
+let dirsInitialized = false;
+let ensureDirsPromise = null;
 
 async function nextMigrationBackupPath(destination) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -218,27 +223,214 @@ async function migrateLegacy26_2Instance() {
   return { migrated: moved.length > 0, moved };
 }
 
+
+function sharedInstancePath(name) {
+  return path.join(APPDATA_ROOT, name);
+}
+
+async function samePhysicalEntry(first, second) {
+  try {
+    const [a, b] = await Promise.all([fsp.stat(first), fsp.stat(second)]);
+    return a.dev === b.dev && a.ino === b.ino;
+  } catch {
+    return false;
+  }
+}
+
+async function linkResolvesTo(linkPath, targetPath) {
+  try {
+    const info = await fsp.lstat(linkPath);
+    if (!info.isSymbolicLink()) return false;
+    const [resolvedLink, resolvedTarget] = await Promise.all([
+      fsp.realpath(linkPath),
+      fsp.realpath(targetPath)
+    ]);
+    return path.resolve(resolvedLink) === path.resolve(resolvedTarget);
+  } catch {
+    return false;
+  }
+}
+
+async function moveToSharedMigrationBackup(source, sourceLabel, entryName, relativePath = '') {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const base = path.join(
+    LAUNCHER_DATA,
+    'shared-data-migration-backups',
+    stamp,
+    String(sourceLabel || 'unknown'),
+    entryName,
+    relativePath
+  );
+  const destination = await nextMigrationBackupPath(base);
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  await fsp.rename(source, destination);
+  log(`[Shared data] Preserved older/conflicting ${entryName} data at ${destination}.`, 'launcher');
+  return destination;
+}
+
+async function mergeFileIntoShared(source, destination, sourceLabel, entryName, relativePath = '') {
+  if (!await pathExists(source)) return;
+
+  if (await pathExists(destination) && await samePhysicalEntry(source, destination)) return;
+
+  if (!await pathExists(destination)) {
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.rename(source, destination);
+    return;
+  }
+
+  const [sourceStat, destinationStat] = await Promise.all([
+    fsp.stat(source),
+    fsp.stat(destination)
+  ]);
+
+  if (sourceStat.mtimeMs > destinationStat.mtimeMs) {
+    await moveToSharedMigrationBackup(destination, 'previous-shared', entryName, relativePath);
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.rename(source, destination);
+  } else {
+    await moveToSharedMigrationBackup(source, sourceLabel, entryName, relativePath);
+  }
+}
+
+async function mergeDirectoryIntoShared(source, destination, sourceLabel, entryName, relativePath = '') {
+  if (!await pathExists(source)) return;
+  if (await linkResolvesTo(source, destination)) return;
+
+  if (!await pathExists(destination)) {
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.rename(source, destination);
+    return;
+  }
+
+  const [sourceInfo, destinationInfo] = await Promise.all([
+    fsp.lstat(source),
+    fsp.lstat(destination)
+  ]);
+
+  if (!sourceInfo.isDirectory() || sourceInfo.isSymbolicLink() || !destinationInfo.isDirectory() || destinationInfo.isSymbolicLink()) {
+    const [sourceStat, destinationStat] = await Promise.all([fsp.stat(source), fsp.stat(destination)]);
+    if (sourceStat.mtimeMs > destinationStat.mtimeMs) {
+      await moveToSharedMigrationBackup(destination, 'previous-shared', entryName, relativePath);
+      await fsp.mkdir(path.dirname(destination), { recursive: true });
+      await fsp.rename(source, destination);
+    } else {
+      await moveToSharedMigrationBackup(source, sourceLabel, entryName, relativePath);
+    }
+    return;
+  }
+
+  await fsp.mkdir(destination, { recursive: true });
+  const children = await fsp.readdir(source, { withFileTypes: true });
+  for (const child of children) {
+    const childSource = path.join(source, child.name);
+    const childDestination = path.join(destination, child.name);
+    const childRelative = relativePath ? path.join(relativePath, child.name) : child.name;
+
+    if (child.isDirectory() && !child.isSymbolicLink()) {
+      await mergeDirectoryIntoShared(childSource, childDestination, sourceLabel, entryName, childRelative);
+    } else {
+      await mergeFileIntoShared(childSource, childDestination, sourceLabel, entryName, childRelative);
+    }
+  }
+  await fsp.rmdir(source).catch(() => {});
+}
+
+async function ensureSharedDirectoryForVersion(gameVersion, entryName) {
+  const shared = sharedInstancePath(entryName);
+  const instanceEntry = instancePath(gameVersion, entryName);
+  await fsp.mkdir(shared, { recursive: true });
+
+  if (await linkResolvesTo(instanceEntry, shared)) return;
+  if (await pathExists(instanceEntry)) {
+    await mergeDirectoryIntoShared(instanceEntry, shared, gameVersion, entryName);
+  }
+  await fsp.rm(instanceEntry, { recursive: true, force: true }).catch(() => {});
+
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  await fsp.symlink(shared, instanceEntry, linkType);
+}
+
+async function ensureSharedFileForVersion(gameVersion, entryName) {
+  const shared = sharedInstancePath(entryName);
+  const instanceEntry = instancePath(gameVersion, entryName);
+
+  if (await pathExists(instanceEntry)) {
+    if (!await pathExists(shared) || !await samePhysicalEntry(instanceEntry, shared)) {
+      await mergeFileIntoShared(instanceEntry, shared, gameVersion, entryName);
+    }
+  }
+
+  if (!await pathExists(shared)) return;
+  if (await samePhysicalEntry(instanceEntry, shared)) return;
+
+  await fsp.rm(instanceEntry, { force: true }).catch(() => {});
+  await fsp.mkdir(path.dirname(instanceEntry), { recursive: true });
+
+  if (process.platform === 'win32') {
+    // File symlinks can require Developer Mode/admin on Windows. A hard link is
+    // privilege-free and keeps these small Minecraft files genuinely shared.
+    await fsp.link(shared, instanceEntry);
+  } else {
+    await fsp.symlink(shared, instanceEntry, 'file');
+  }
+}
+
+async function ensureSharedDataForVersion(gameVersion) {
+  gameVersion = normalizeGameVersion(gameVersion);
+  for (const entryName of SHARED_INSTANCE_DIRECTORIES) {
+    await ensureSharedDirectoryForVersion(gameVersion, entryName);
+  }
+  for (const entryName of SHARED_INSTANCE_FILES) {
+    await ensureSharedFileForVersion(gameVersion, entryName);
+  }
+}
+
+async function ensureSharedInstanceData() {
+  // These live directly in the main SpectorClient directory and are presented
+  // inside every version instance. Mods remain version-specific.
+  for (const gameVersion of Object.keys(CLIENT_PROFILES)) {
+    await ensureSharedDataForVersion(gameVersion);
+  }
+}
+
 async function ensureDirs() {
-  // Create only launcher-global directories first. The legacy 26.2 migration
-  // must run before the new per-version instance directories are initialized.
-  await Promise.all([
-    fsp.mkdir(APPDATA_ROOT, { recursive: true }),
-    fsp.mkdir(LAUNCHER_DATA, { recursive: true }),
-    fsp.mkdir(launcherDataPath('accounts'), { recursive: true }),
-    fsp.mkdir(path.join(APPDATA_ROOT, 'instances'), { recursive: true }),
-    fsp.mkdir(path.join(APPDATA_ROOT, 'runtime'), { recursive: true }),
-    fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true })
-  ]);
+  if (dirsInitialized) return;
+  if (!ensureDirsPromise) {
+    ensureDirsPromise = (async () => {
+      // Create only launcher-global directories first. The legacy 26.2 migration
+      // must run before the new per-version instance directories are initialized.
+      await Promise.all([
+        fsp.mkdir(APPDATA_ROOT, { recursive: true }),
+        fsp.mkdir(LAUNCHER_DATA, { recursive: true }),
+        fsp.mkdir(launcherDataPath('accounts'), { recursive: true }),
+        fsp.mkdir(path.join(APPDATA_ROOT, 'instances'), { recursive: true }),
+        fsp.mkdir(path.join(APPDATA_ROOT, 'runtime'), { recursive: true }),
+        fsp.mkdir(JAVA_RUNTIME_DOWNLOAD_DIR, { recursive: true })
+      ]);
 
-  await migrateLegacy26_2Instance();
+      await migrateLegacy26_2Instance();
 
-  const versionRoots = Object.keys(CLIENT_PROFILES).map((gameVersion) => getInstanceRoot(gameVersion));
-  const versionDirs = versionRoots.flatMap((root) => [
-    fsp.mkdir(root, { recursive: true }),
-    fsp.mkdir(path.join(root, 'mods'), { recursive: true }),
-    fsp.mkdir(path.join(root, 'versions'), { recursive: true })
-  ]);
-  await Promise.all(versionDirs);
+      const versionRoots = Object.keys(CLIENT_PROFILES).map((gameVersion) => getInstanceRoot(gameVersion));
+      const versionDirs = versionRoots.flatMap((root) => [
+        fsp.mkdir(root, { recursive: true }),
+        fsp.mkdir(path.join(root, 'mods'), { recursive: true }),
+        fsp.mkdir(path.join(root, 'versions'), { recursive: true })
+      ]);
+      await Promise.all(versionDirs);
+
+      // Keep only mods/version runtime data isolated. User settings that should
+      // follow the player between 26.2, 26.3 and 1.21.11 live in APPDATA_ROOT.
+      await ensureSharedInstanceData();
+      dirsInitialized = true;
+    })();
+  }
+
+  try {
+    await ensureDirsPromise;
+  } finally {
+    if (!dirsInitialized) ensureDirsPromise = null;
+  }
 }
 
 function temurinArch() {
@@ -2353,6 +2545,12 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     // Persist only after any manually-entered Java override has passed validation.
     await saveSettings(merged);
 
+    // A few Minecraft/user files are intentionally shared between all client
+    // versions. Reconcile them immediately before launch in case Minecraft
+    // replaced a hard link during its previous shutdown.
+    send('game-state', { state: 'installing', text: 'Syncing shared settings…' });
+    await ensureSharedDataForVersion(selectedGameVersion);
+
     send('game-state', { state: 'installing', text: 'Checking client files…' });
     const fabric = await prepareClient(selectedGameVersion);
 
@@ -2398,10 +2596,17 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     );
     if (merged.closeLauncherOnStart && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
 
-    child.once('exit', (code) => {
+    child.once('exit', async (code) => {
       activeGameProcess = null;
       const exitedVersion = activeGameVersion || selectedGameVersion;
       activeGameVersion = null;
+
+      try {
+        await ensureSharedDataForVersion(exitedVersion);
+      } catch (error) {
+        log(`[Shared data] Could not reconcile ${exitedVersion} after Minecraft exited: ${error.message}`, 'launcher');
+      }
+
       send('game-state', { state: 'stopped', text: `SpectorClient ${exitedVersion} exited${code == null ? '' : ` with code ${code}`}.`, gameVersion: exitedVersion });
 
       // If an update arrived while the user was playing, install it immediately
