@@ -2117,6 +2117,63 @@ code,
   font-weight: 900;
   letter-spacing: .9px;
 }
+.social-presence-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.social-status-button:hover { color: var(--theme-soft-2); }
+.social-status-chevron {
+  margin-left: -1px;
+  font-size: 8px;
+  line-height: 1;
+  transform: translateY(-1px);
+  opacity: .7;
+  transition: transform .14s ease, opacity .14s ease;
+}
+.social-status-button[aria-expanded="true"] .social-status-chevron { transform: translateY(0) rotate(180deg); opacity: 1; }
+.social-presence-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 80;
+  width: 146px;
+  padding: 5px;
+  border: 1px solid rgba(var(--accent-rgb), .24);
+  border-radius: 10px;
+  background: rgb(var(--surface-1-rgb));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .38), 0 0 22px rgba(var(--accent-rgb), .08);
+}
+.social-presence-menu button {
+  width: 100%;
+  height: 29px;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--theme-soft-2);
+  text-align: left;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.social-presence-menu button:hover { background: rgba(var(--accent-rgb), .10); color: var(--theme-input-text); }
+.social-presence-menu button.active { background: rgba(var(--accent-rgb), .14); color: var(--theme-input-text); }
+.social-menu-dot { width: 7px; height: 7px; border-radius: 50%; background: #52636b; }
+.social-menu-dot.online { background: #48df8e; box-shadow: 0 0 8px rgba(72, 223, 142, .45); }
+.social-menu-dot.dnd { background: #ff6b79; box-shadow: 0 0 8px rgba(255, 107, 121, .38); }
+.social-menu-dot.idle { background: #f1c75b; box-shadow: 0 0 8px rgba(241, 199, 91, .35); }
+.social-menu-dot.invisible { background: #667983; box-shadow: none; }
+.social-menu-check { visibility: hidden; text-align: right; color: var(--blue-2); font-size: 9px; }
+.social-presence-menu button.active .social-menu-check { visibility: visible; }
+.live-dot.online { background: #48df8e !important; box-shadow: 0 0 10px rgba(72, 223, 142, .72) !important; }
+.live-dot.dnd { background: #ff6b79 !important; box-shadow: 0 0 10px rgba(255, 107, 121, .60) !important; }
+.live-dot.idle { background: #f1c75b !important; box-shadow: 0 0 10px rgba(241, 199, 91, .55) !important; }
+.live-dot.invisible { background: #667983 !important; box-shadow: none !important; }
 .live-dot.offline { background: #52636b; box-shadow: none; }
 .live-dot.connecting { background: #f1c75b; box-shadow: 0 0 9px rgba(241, 199, 91, .55); }
 .live-dot.online { background: #48df8e; box-shadow: 0 0 10px rgba(72, 223, 142, .72); }
@@ -2176,44 +2233,6 @@ code,
   color: var(--theme-muted);
   font-size: 7px;
 }
-.social-presence-control {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  margin-top: 3px;
-}
-.social-presence-indicator {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border-radius: 50%;
-  background: #48df8e;
-  box-shadow: 0 0 8px rgba(72, 223, 142, .45);
-}
-.social-presence-indicator.online { background: #48df8e; box-shadow: 0 0 8px rgba(72, 223, 142, .45); }
-.social-presence-indicator.dnd { background: #ff6b79; box-shadow: 0 0 8px rgba(255, 107, 121, .38); }
-.social-presence-indicator.idle { background: #f1c75b; box-shadow: 0 0 8px rgba(241, 199, 91, .35); }
-.social-presence-indicator.invisible { background: #667983; box-shadow: none; }
-.social-presence-select {
-  min-width: 0;
-  width: 100%;
-  height: 20px;
-  padding: 0 22px 0 7px;
-  border: 1px solid rgba(var(--accent-rgb), .20);
-  border-radius: 6px;
-  outline: 0;
-  background: rgba(var(--surface-1-rgb), .88);
-  color: var(--theme-soft-2);
-  font: inherit;
-  font-size: 7px;
-  font-weight: 850;
-  cursor: pointer;
-}
-.social-presence-select:hover,
-.social-presence-select:focus { border-color: rgba(var(--accent-rgb), .40); }
-.social-presence-select:disabled { opacity: .6; cursor: wait; }
-.social-presence-select option { background: rgb(var(--surface-1-rgb)); color: var(--theme-soft-2); }
 .social-home,
 .social-chat { min-height: 0; }
 .social-home { display: grid; grid-template-rows: 28px minmax(0, 1fr); }
@@ -2407,3 +2426,7 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
 
 /* Give realtime chat more room than the old Coming Soon placeholder. */
 .right-rail { grid-template-rows: 64% 36%; }
+
+/* v1.6.29 - Satellite header presence selector */
+.social-status-button:disabled { cursor: default; opacity: .72; }
+.social-presence-menu button:disabled { cursor: wait; opacity: .62; }

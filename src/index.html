@@ -361,10 +361,19 @@
       <section class="right-panel friends-panel">
         <div class="right-panel-head">
           <span>SPECTOR SATELLITE</span>
-          <button id="socialReconnectBtn" class="social-status-button" title="Reconnect to Spector Satellite">
-            <span id="socialLiveDot" class="live-dot offline"></span>
-            <span id="socialConnectionLabel">OFFLINE</span>
-          </button>
+          <div class="social-presence-menu-wrap">
+            <button id="socialStatusBtn" class="social-status-button" type="button" aria-haspopup="menu" aria-expanded="false" title="Change Spector Satellite status">
+              <span id="socialLiveDot" class="live-dot offline"></span>
+              <span id="socialConnectionLabel">OFFLINE</span>
+              <span class="social-status-chevron" aria-hidden="true">⌄</span>
+            </button>
+            <div id="socialPresenceMenu" class="social-presence-menu hidden" role="menu" aria-label="Spector Satellite status">
+              <button type="button" data-social-presence="online" role="menuitem"><span class="social-menu-dot online"></span><span>Online</span><span class="social-menu-check">✓</span></button>
+              <button type="button" data-social-presence="dnd" role="menuitem"><span class="social-menu-dot dnd"></span><span>DND</span><span class="social-menu-check">✓</span></button>
+              <button type="button" data-social-presence="invisible" role="menuitem"><span class="social-menu-dot invisible"></span><span>Invisible (Offline)</span><span class="social-menu-check">✓</span></button>
+              <button type="button" data-social-presence="idle" role="menuitem"><span class="social-menu-dot idle"></span><span>Idle</span><span class="social-menu-check">✓</span></button>
+            </div>
+          </div>
         </div>
 
         <div id="socialSignedOut" class="friends-content social-empty-state">
@@ -378,15 +387,6 @@
             <img id="socialSelfAvatar" class="social-avatar" alt="" />
             <div class="social-self-copy">
               <b id="socialSelfName">SpectorPlayer</b>
-              <div class="social-presence-control">
-                <span id="socialPresenceIndicator" class="social-presence-indicator online"></span>
-                <select id="socialPresenceSelect" class="social-presence-select" aria-label="Spector Satellite presence">
-                  <option value="online">Online</option>
-                  <option value="dnd">DND</option>
-                  <option value="invisible">Invisible (Offline)</option>
-                  <option value="idle">Idle</option>
-                </select>
-              </div>
               <span id="socialSelfStatus">Connecting…</span>
             </div>
           </div>

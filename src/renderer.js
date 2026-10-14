@@ -510,11 +510,26 @@ function closeSocialChat() {
 function renderSocial() {
   const account = selectedAccount();
   const connection = socialState.connection || 'disconnected';
+  const presenceMode = ['online', 'dnd', 'idle', 'invisible'].includes(socialState.presenceMode)
+    ? socialState.presenceMode
+    : (['online', 'dnd', 'idle', 'invisible'].includes(settings?.socialPresenceMode) ? settings.socialPresenceMode : 'online');
+
+  const modeLabels = { online: 'ONLINE', dnd: 'DND', idle: 'IDLE', invisible: 'INVISIBLE' };
+  let headerMode = presenceMode;
+  let headerLabel = modeLabels[presenceMode] || 'ONLINE';
+  if (!account || connection === 'signed-out') { headerMode = 'offline'; headerLabel = 'SIGN IN'; }
+  else if (connection === 'connecting') { headerMode = 'connecting'; headerLabel = 'CONNECTING'; }
+  else if (connection === 'offline' || connection === 'disconnected') { headerMode = socialState.error ? 'error' : 'offline'; headerLabel = 'OFFLINE'; }
+  else if (connection === 'invisible') { headerMode = 'invisible'; headerLabel = 'INVISIBLE'; }
+
   const dot = $('socialLiveDot');
-  if (dot) {
-    dot.className = 'live-dot ' + (connection === 'online' ? 'online' : connection === 'connecting' ? 'connecting' : connection === 'offline' && socialState.error ? 'error' : 'offline');
-  }
-  if ($('socialConnectionLabel')) $('socialConnectionLabel').textContent = connection === 'signed-out' ? 'SIGN IN' : connection === 'invisible' ? 'INVISIBLE' : connection.toUpperCase();
+  if (dot) dot.className = `live-dot ${headerMode}`;
+  if ($('socialConnectionLabel')) $('socialConnectionLabel').textContent = headerLabel;
+  const statusButton = $('socialStatusBtn');
+  if (statusButton) statusButton.disabled = !account;
+  document.querySelectorAll('[data-social-presence]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.socialPresence === presenceMode);
+  });
 
   const showMain = Boolean(account);
   $('socialSignedOut')?.classList.toggle('hidden', showMain);
@@ -524,14 +539,6 @@ function renderSocial() {
   const me = socialState.me || { id: account.uuid, username: account.name };
   $('socialSelfAvatar').src = socialHeadUrl(me, 64);
   $('socialSelfName').textContent = me.username || account.name;
-
-  const presenceMode = ['online', 'dnd', 'idle', 'invisible'].includes(socialState.presenceMode)
-    ? socialState.presenceMode
-    : (['online', 'dnd', 'idle', 'invisible'].includes(settings?.socialPresenceMode) ? settings.socialPresenceMode : 'online');
-  const presenceSelect = $('socialPresenceSelect');
-  if (presenceSelect && presenceSelect.value !== presenceMode) presenceSelect.value = presenceMode;
-  const presenceIndicator = $('socialPresenceIndicator');
-  if (presenceIndicator) presenceIndicator.className = `social-presence-indicator ${presenceMode}`;
 
   let statusText = 'Connecting to Satellite…';
   if (connection === 'online') {
@@ -1348,22 +1355,42 @@ $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClien
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });
 $('newsHomeBtn').addEventListener('click', () => showView('home'));
 
-$('socialReconnectBtn').addEventListener('click', () => void syncSocialConnection(true));
-$('socialPresenceSelect').addEventListener('change', async (event) => {
-  const select = event.currentTarget;
-  const mode = select.value;
-  select.disabled = true;
-  try {
-    const next = await window.launcher.setSocialPresenceMode(mode);
-    settings = { ...(settings || {}), socialPresenceMode: mode };
-    if (next) socialState = next;
-    renderSocial();
-  } catch (error) {
-    showToast(error.message || 'Could not change presence.');
-    select.value = socialState.presenceMode || settings?.socialPresenceMode || 'online';
-  } finally {
-    select.disabled = false;
-  }
+const socialStatusBtn = $('socialStatusBtn');
+const socialPresenceMenu = $('socialPresenceMenu');
+function setSocialPresenceMenuOpen(open) {
+  if (!socialPresenceMenu || !socialStatusBtn) return;
+  const nextOpen = Boolean(open) && !socialStatusBtn.disabled;
+  socialPresenceMenu.classList.toggle('hidden', !nextOpen);
+  socialStatusBtn.setAttribute('aria-expanded', String(nextOpen));
+}
+socialStatusBtn?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setSocialPresenceMenuOpen(socialPresenceMenu?.classList.contains('hidden'));
+});
+document.querySelectorAll('[data-social-presence]').forEach((button) => {
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    const mode = button.dataset.socialPresence;
+    const buttons = [...document.querySelectorAll('[data-social-presence]')];
+    buttons.forEach((item) => { item.disabled = true; });
+    try {
+      const next = await window.launcher.setSocialPresenceMode(mode);
+      settings = { ...(settings || {}), socialPresenceMode: mode };
+      if (next) socialState = next;
+      setSocialPresenceMenuOpen(false);
+      renderSocial();
+    } catch (error) {
+      showToast(error.message || 'Could not change presence.');
+    } finally {
+      buttons.forEach((item) => { item.disabled = false; });
+    }
+  });
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.social-presence-menu-wrap')) setSocialPresenceMenuOpen(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setSocialPresenceMenuOpen(false);
 });
 document.querySelectorAll('[data-social-tab]').forEach((button) => {
   button.addEventListener('click', () => setSocialTab(button.dataset.socialTab));
