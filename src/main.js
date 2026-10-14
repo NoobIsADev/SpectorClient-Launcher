@@ -59,6 +59,7 @@ const logBuffer = [];
 const MAX_LOG_LINES = 2500;
 let activeGameProcess = null;
 let activeGameVersion = null;
+let activeGameServerAddress = null;
 let launcherEventsBound = false;
 let preferredUiScale = 1;
 let effectiveUiScale = 1;
@@ -1220,7 +1221,7 @@ async function showNotificationPermissionHelp() {
     type: 'warning',
     title: 'SpectorClient Notifications',
     message: 'Windows notifications are blocked for SpectorClient.',
-    detail: 'SpectorClient uses Windows notifications when Minecraft starts and when launcher updates are ready or installing. Enable notifications in Windows Settings to receive them.',
+    detail: 'SpectorClient uses Windows notifications for Minecraft startup, launcher updates, friend activity, friend requests, and messages. Enable notifications in Windows Settings to receive them.',
     buttons: ['Open Notification Settings', 'Not Now'],
     defaultId: 0,
     cancelId: 1,
@@ -1840,13 +1841,85 @@ function scheduleSatelliteReconnect(accountId = satelliteAccountId) {
   satelliteReconnectTimer.unref?.();
 }
 
+function normalizeSatelliteServerAddress(value) {
+  return String(value || '').trim().replace(/^\//, '') || null;
+}
+
+function satellitePresenceActivity(presence) {
+  return presence && typeof presence === 'object' && presence.activity && typeof presence.activity === 'object'
+    ? presence.activity
+    : {};
+}
+
+function satellitePresenceIsPlaying(presence) {
+  if (!presence?.online) return false;
+  const activity = satellitePresenceActivity(presence);
+  const text = String(activity.text || '');
+  return Boolean(activity.version) && (/^Playing SpectorClient/i.test(text) || Boolean(activity.server));
+}
+
+function maybeNotifyFriendPresence(friend, previousPresence, nextPresence) {
+  if (!friend?.username || !previousPresence || !nextPresence) return;
+
+  const previousActivity = satellitePresenceActivity(previousPresence);
+  const nextActivity = satellitePresenceActivity(nextPresence);
+  const wasPlaying = satellitePresenceIsPlaying(previousPresence);
+  const isPlaying = satellitePresenceIsPlaying(nextPresence);
+  const previousServer = normalizeSatelliteServerAddress(previousActivity.server);
+  const nextServer = normalizeSatelliteServerAddress(nextActivity.server);
+
+  if (!wasPlaying && isPlaying && nextActivity.version) {
+    showNativeNotification(
+      'Friend Online',
+      `${friend.username} is now playing minecraft ${nextActivity.version}`,
+      { kind: 'satellite-friend-playing' }
+    );
+  }
+
+  if (nextPresence.online && nextServer && nextServer !== previousServer) {
+    showNativeNotification(
+      'Friend Connected',
+      `${friend.username} connected to ${nextServer}`,
+      { kind: 'satellite-friend-server' }
+    );
+  }
+}
+
+function detectServerAddressFromGameLog(line) {
+  const text = String(line || '');
+  let match = text.match(/Connecting to\s+([^\s,]+)\s*,\s*(\d{1,5})/i);
+  if (match) return `${match[1]}:${match[2]}`;
+  match = text.match(/Connecting to\s+([^\s]+:\d{1,5})/i);
+  if (match) return normalizeSatelliteServerAddress(match[1]);
+  return null;
+}
+
+function gameLogShowsServerDisconnect(line) {
+  return /(?:Disconnected|Disconnecting from server|Lost connection|Connection closed)/i.test(String(line || ''));
+}
+
+function updateActiveGameServerFromLog(line) {
+  if (!activeGameVersion) return;
+  const detected = detectServerAddressFromGameLog(line);
+  if (detected && detected !== activeGameServerAddress) {
+    activeGameServerAddress = detected;
+    log(`[Satellite] Detected server connection: ${detected}`, 'debug');
+    void sendSatellitePresence();
+    return;
+  }
+  if (activeGameServerAddress && gameLogShowsServerDisconnect(line)) {
+    activeGameServerAddress = null;
+    void sendSatellitePresence();
+  }
+}
+
 async function sendSatellitePresence() {
   if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) return false;
   const current = await loadSettings().catch(() => defaultSettings());
   const gameVersion = activeGameVersion || normalizeGameVersion(current.selectedGameVersion);
   const activity = activeGameVersion
     ? {
-        server: String(current.serverAddress || '').trim() || null,
+        server: normalizeSatelliteServerAddress(activeGameServerAddress),
         version: activeGameVersion,
         text: `Playing SpectorClient ${activeGameVersion}`
       }
@@ -1893,7 +1966,11 @@ function handleSatellitePacket(packet) {
   }
 
   if (packet.type === 'presence.update') {
-    updateSatelliteFriend(packet.userId, (friend) => ({ ...friend, presence: packet.presence || { online: false, status: 'offline', activity: null } }));
+    const friend = (satelliteState.friends || []).find((entry) => String(entry.id) === String(packet.userId));
+    const previousPresence = friend?.presence || null;
+    const nextPresence = packet.presence || { online: false, status: 'offline', activity: null };
+    updateSatelliteFriend(packet.userId, (entry) => ({ ...entry, presence: nextPresence }));
+    if (friend && previousPresence) maybeNotifyFriendPresence(friend, previousPresence, nextPresence);
     return;
   }
 
@@ -2024,9 +2101,6 @@ async function connectSatelliteForSelectedAccount({ force = false } = {}) {
     // Refresh the Minecraft token from prismarine-auth, then exchange it for a
     // Satellite-only token. Satellite tokens never touch settings.json/disk.
     const minecraftSession = await getMinecraftSession(targetAccountId, false);
-    if (!SATELLITE_BASE_URL.startsWith('https://')) {
-      log('[Satellite] WARNING: Satellite is configured over unencrypted HTTP. Use HTTPS/WSS before deploying to real users.', 'launcher');
-    }
     const auth = await satelliteHttpRequest('/v1/auth/minecraft', {
       method: 'POST',
       token: minecraftSession.token
@@ -2675,7 +2749,10 @@ function bindLauncherEvents() {
   if (launcherEventsBound) return;
   launcherEventsBound = true;
   launcher.on('debug', (line) => log(line, 'debug'));
-  launcher.on('data', (line) => log(line, 'game'));
+  launcher.on('data', (line) => {
+    log(line, 'game');
+    updateActiveGameServerFromLog(line);
+  });
 }
 
 // ---------------------------
@@ -2915,6 +2992,8 @@ ipcMain.handle('game:stop', async () => {
   if (!child || child.exitCode != null) {
     activeGameProcess = null;
     activeGameVersion = null;
+    activeGameServerAddress = null;
+    void sendSatellitePresence();
     send('game-state', { state: 'stopped', text: 'SpectorClient is not running.' });
     return { ok: false, alreadyStopped: true };
   }
@@ -3027,6 +3106,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     const child = await launcher.launch(opts);
     activeGameProcess = child;
     activeGameVersion = selectedGameVersion;
+    activeGameServerAddress = normalizeSatelliteServerAddress(merged.serverAddress);
     gameLaunchInProgress = false;
     send('game-state', { state: 'running', text: `SpectorClient ${selectedGameVersion} is running.`, gameVersion: selectedGameVersion });
     void sendSatellitePresence();
@@ -3041,6 +3121,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
       activeGameProcess = null;
       const exitedVersion = activeGameVersion || selectedGameVersion;
       activeGameVersion = null;
+      activeGameServerAddress = null;
       void sendSatellitePresence();
 
       try {

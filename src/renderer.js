@@ -525,11 +525,11 @@ function renderSocial() {
   $('socialSelfAvatar').src = socialHeadUrl(me, 64);
   $('socialSelfName').textContent = me.username || account.name;
   let statusText = 'Connecting to Satellite…';
-  if (connection === 'online') statusText = socialState.secure ? 'Satellite connected' : 'Satellite connected • HTTP';
+  if (connection === 'online') statusText = 'Satellite connected';
   if (connection === 'offline') statusText = socialState.error || 'Satellite offline';
   if (connection === 'disconnected') statusText = 'Satellite disconnected';
   $('socialSelfStatus').textContent = statusText;
-  $('socialSelfStatus').classList.toggle('social-unsecure-note', connection === 'online' && !socialState.secure);
+  $('socialSelfStatus').classList.remove('social-unsecure-note');
 
   renderSocialFriends();
   renderSocialRequests();
