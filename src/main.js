@@ -44,6 +44,7 @@ const UPDATE_REPO_NAME = 'SpectorClient-Launcher';
 const SATELLITE_BASE_URL = String(process.env.SPECTOR_SATELLITE_URL || 'http://nyc1.nightly.host:25597').replace(/\/+$/, '');
 const SATELLITE_RECONNECT_MS = 5000;
 const SATELLITE_REQUEST_TIMEOUT_MS = 15000;
+const SATELLITE_PRESENCE_MODES = new Set(['online', 'dnd', 'idle', 'invisible']);
 
 // Keep this client completely separate from the normal .minecraft folder.
 const APPDATA_ROOT = process.env.APPDATA
@@ -103,7 +104,8 @@ let satelliteState = {
   incoming: [],
   outgoing: [],
   blocked: [],
-  error: null
+  error: null,
+  presenceMode: 'online'
 };
 
 // The UI was designed around this content area. The preferred user scale is
@@ -145,6 +147,11 @@ function getModRegistryPath(value) {
     : launcherDataPath(`mods-registry-${gameVersion}.json`);
 }
 
+function normalizeSocialPresenceMode(value) {
+  const mode = String(value || '').toLowerCase();
+  return SATELLITE_PRESENCE_MODES.has(mode) ? mode : 'online';
+}
+
 function defaultSettings() {
   return {
     selectedAccountId: null,
@@ -164,6 +171,7 @@ function defaultSettings() {
     soundsEnabled: true,
     soundVolume: 42,
     theme: 'classic',
+    socialPresenceMode: 'online',
     accounts: []
   };
 }
@@ -884,6 +892,7 @@ async function loadSettings() {
       ...defaultSettings(),
       ...parsed,
       selectedGameVersion: normalizeGameVersion(parsed.selectedGameVersion),
+      socialPresenceMode: normalizeSocialPresenceMode(parsed.socialPresenceMode),
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : []
     };
   } catch {
@@ -894,6 +903,7 @@ async function loadSettings() {
 async function saveSettings(settings) {
   const safe = { ...defaultSettings(), ...settings };
   safe.selectedGameVersion = normalizeGameVersion(safe.selectedGameVersion);
+  safe.socialPresenceMode = normalizeSocialPresenceMode(safe.socialPresenceMode);
   delete safe.gameDirectory;
   delete safe.clientId;
   delete safe.selectedVersion;
@@ -1726,7 +1736,13 @@ function satelliteSnapshot() {
 }
 
 function emitSatelliteState(patch = {}) {
-  satelliteState = { ...satelliteState, ...patch, endpoint: SATELLITE_BASE_URL, secure: SATELLITE_BASE_URL.startsWith('https://') };
+  satelliteState = {
+    ...satelliteState,
+    ...patch,
+    endpoint: SATELLITE_BASE_URL,
+    secure: SATELLITE_BASE_URL.startsWith('https://'),
+    presenceMode: normalizeSocialPresenceMode(patch.presenceMode ?? satelliteState.presenceMode)
+  };
   send('social-state', satelliteSnapshot());
 }
 
@@ -1858,8 +1874,12 @@ function satellitePresenceIsPlaying(presence) {
   return Boolean(activity.version) && (/^Playing SpectorClient/i.test(text) || Boolean(activity.server));
 }
 
+function satelliteDesktopNotificationsEnabled() {
+  return normalizeSocialPresenceMode(satelliteState.presenceMode) !== 'dnd';
+}
+
 function maybeNotifyFriendPresence(friend, previousPresence, nextPresence) {
-  if (!friend?.username || !previousPresence || !nextPresence) return;
+  if (!friend?.username || !previousPresence || !nextPresence || !satelliteDesktopNotificationsEnabled()) return;
 
   const previousActivity = satellitePresenceActivity(previousPresence);
   const nextActivity = satellitePresenceActivity(nextPresence);
@@ -1914,8 +1934,16 @@ function updateActiveGameServerFromLog(line) {
 }
 
 async function sendSatellitePresence() {
-  if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) return false;
   const current = await loadSettings().catch(() => defaultSettings());
+  const presenceMode = normalizeSocialPresenceMode(current.socialPresenceMode);
+  emitSatelliteState({ presenceMode });
+
+  // Invisible keeps the authenticated Satellite session available for REST
+  // actions (search/messages) but intentionally has no realtime socket. The
+  // backend therefore reports this user as offline to friends.
+  if (presenceMode === 'invisible') return false;
+  if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) return false;
+
   const gameVersion = activeGameVersion || normalizeGameVersion(current.selectedGameVersion);
   const activity = activeGameVersion
     ? {
@@ -1929,7 +1957,7 @@ async function sendSatellitePresence() {
         text: 'In SpectorClient Launcher'
       };
   try {
-    satelliteSocket.send(JSON.stringify({ type: 'presence.set', status: 'online', activity }));
+    satelliteSocket.send(JSON.stringify({ type: 'presence.set', status: presenceMode, activity }));
     return true;
   } catch {
     return false;
@@ -1982,10 +2010,14 @@ function handleSatellitePacket(packet) {
   if (packet.type === 'message.new' && packet.message && String(packet.message.to) === String(satelliteState.me?.id || '')) {
     const sender = (satelliteState.friends || []).find((friend) => String(friend.id) === String(packet.message.from));
     const preview = String(packet.message.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-    showNativeNotification(sender?.username || 'Spector Satellite', preview || 'New message', { kind: 'satellite-message' });
+    if (satelliteDesktopNotificationsEnabled()) {
+      showNativeNotification(sender?.username || 'Spector Satellite', preview || 'New message', { kind: 'satellite-message' });
+    }
   }
   if (packet.type === 'friend.request') {
-    showNativeNotification('Friend Request', `${packet.from?.username || 'Someone'} sent you a SpectorClient friend request.`, { kind: 'satellite-friend-request' });
+    if (satelliteDesktopNotificationsEnabled()) {
+      showNativeNotification('Friend Request', `${packet.from?.username || 'Someone'} sent you a SpectorClient friend request.`, { kind: 'satellite-friend-request' });
+    }
   }
 
   if (['friend.request', 'friend.accepted', 'friend.denied', 'friend.removed'].includes(packet.type)) {
@@ -2068,8 +2100,12 @@ async function connectSatelliteForSelectedAccount({ force = false } = {}) {
     return satelliteSnapshot();
   }
 
-  if (!force && satelliteAccountId === account.id && satelliteSessionToken && satelliteSocket?.readyState === WebSocket.OPEN) {
-    return satelliteSnapshot();
+  const configuredPresenceMode = normalizeSocialPresenceMode(settings.socialPresenceMode);
+  emitSatelliteState({ presenceMode: configuredPresenceMode });
+
+  if (!force && satelliteAccountId === account.id && satelliteSessionToken) {
+    if (configuredPresenceMode === 'invisible') return satelliteSnapshot();
+    if (satelliteSocket?.readyState === WebSocket.OPEN) return satelliteSnapshot();
   }
   if (satelliteConnectPromise) {
     // Account switches can happen while a token exchange is in flight. Let that
@@ -2083,7 +2119,7 @@ async function connectSatelliteForSelectedAccount({ force = false } = {}) {
   }
 
   const targetAccountId = account.id;
-  satelliteManualDisconnect = false;
+  satelliteManualDisconnect = configuredPresenceMode === 'invisible';
   clearSatelliteReconnect();
   closeSatelliteSocket();
   emitSatelliteState({
@@ -2125,8 +2161,17 @@ async function connectSatelliteForSelectedAccount({ force = false } = {}) {
       blocked: Array.isArray(me.blocked) ? me.blocked : [],
       error: null
     });
-    await connectSatelliteRealtime();
-    log(`[Satellite] Connected as ${auth.user?.username || account.name} to ${SATELLITE_BASE_URL}.`, 'launcher');
+    const latestPresenceMode = normalizeSocialPresenceMode(latestSettings.socialPresenceMode);
+    emitSatelliteState({ presenceMode: latestPresenceMode });
+    if (latestPresenceMode === 'invisible') {
+      satelliteManualDisconnect = true;
+      emitSatelliteState({ connection: 'invisible', error: null, presenceMode: 'invisible' });
+      log(`[Satellite] Connected as ${auth.user?.username || account.name} in Invisible mode.`, 'launcher');
+    } else {
+      satelliteManualDisconnect = false;
+      await connectSatelliteRealtime();
+      log(`[Satellite] Connected as ${auth.user?.username || account.name} to ${SATELLITE_BASE_URL}.`, 'launcher');
+    }
     return satelliteSnapshot();
   })().catch((error) => {
     if (satelliteAccountId === targetAccountId || !satelliteAccountId) {
@@ -2940,6 +2985,35 @@ ipcMain.handle('social:set-status', async (_event, statusMessage) => {
   });
   emitSatelliteState({ me: result.user || satelliteState.me });
   return result;
+});
+
+ipcMain.handle('social:set-presence-mode', async (_event, requestedMode) => {
+  const mode = normalizeSocialPresenceMode(requestedMode);
+  const current = await loadSettings();
+  current.socialPresenceMode = mode;
+  await saveSettings(current);
+  emitSatelliteState({ presenceMode: mode, error: null });
+
+  if (mode === 'invisible') {
+    satelliteManualDisconnect = true;
+    clearSatelliteReconnect();
+    closeSatelliteSocket();
+    emitSatelliteState({ connection: 'invisible', presenceMode: mode, error: null });
+    // Refreshing over REST is still allowed while invisible so the local UI
+    // can show the latest friend/request state without revealing presence.
+    await refreshSatelliteFriends().catch(() => {});
+    emitSatelliteState({ connection: 'invisible', presenceMode: mode, error: null });
+    return satelliteSnapshot();
+  }
+
+  satelliteManualDisconnect = false;
+  if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) {
+    await connectSatelliteForSelectedAccount({ force: true });
+  } else {
+    await sendSatellitePresence();
+  }
+  emitSatelliteState({ presenceMode: mode, error: null });
+  return satelliteSnapshot();
 });
 
 ipcMain.handle('account:add', async () => {

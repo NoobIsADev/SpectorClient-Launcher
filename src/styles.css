@@ -2126,7 +2126,7 @@ code,
   height: calc(100% - 24px);
   min-height: 0;
   display: grid;
-  grid-template-rows: 45px minmax(0, 1fr);
+  grid-template-rows: 62px minmax(0, 1fr);
   gap: 8px;
   margin-top: 8px;
 }
@@ -2176,6 +2176,44 @@ code,
   color: var(--theme-muted);
   font-size: 7px;
 }
+.social-presence-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 3px;
+}
+.social-presence-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: #48df8e;
+  box-shadow: 0 0 8px rgba(72, 223, 142, .45);
+}
+.social-presence-indicator.online { background: #48df8e; box-shadow: 0 0 8px rgba(72, 223, 142, .45); }
+.social-presence-indicator.dnd { background: #ff6b79; box-shadow: 0 0 8px rgba(255, 107, 121, .38); }
+.social-presence-indicator.idle { background: #f1c75b; box-shadow: 0 0 8px rgba(241, 199, 91, .35); }
+.social-presence-indicator.invisible { background: #667983; box-shadow: none; }
+.social-presence-select {
+  min-width: 0;
+  width: 100%;
+  height: 20px;
+  padding: 0 22px 0 7px;
+  border: 1px solid rgba(var(--accent-rgb), .20);
+  border-radius: 6px;
+  outline: 0;
+  background: rgba(var(--surface-1-rgb), .88);
+  color: var(--theme-soft-2);
+  font: inherit;
+  font-size: 7px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.social-presence-select:hover,
+.social-presence-select:focus { border-color: rgba(var(--accent-rgb), .40); }
+.social-presence-select:disabled { opacity: .6; cursor: wait; }
+.social-presence-select option { background: rgb(var(--surface-1-rgb)); color: var(--theme-soft-2); }
 .social-home,
 .social-chat { min-height: 0; }
 .social-home { display: grid; grid-template-rows: 28px minmax(0, 1fr); }
@@ -2195,9 +2233,21 @@ code,
   font-weight: 850;
 }
 .social-tab span {
-  margin-left: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border: 1px solid rgba(var(--accent-rgb), .24);
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), .12);
   color: var(--blue);
-  font-size: 6px;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .social-tab.active {
   border-color: rgba(var(--accent-rgb), .34);

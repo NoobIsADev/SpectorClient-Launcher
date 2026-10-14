@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('launcher', {
   markMessagesRead: (userId) => ipcRenderer.invoke('social:mark-read', userId),
   setTyping: (userId, typing) => ipcRenderer.invoke('social:typing', userId, typing),
   setSocialStatus: (statusMessage) => ipcRenderer.invoke('social:set-status', statusMessage),
+  setSocialPresenceMode: (mode) => ipcRenderer.invoke('social:set-presence-mode', mode),
 
   chooseJava: (major = 25) => ipcRenderer.invoke('dialog:choose-java', major),
   openClientFolder: () => ipcRenderer.invoke('folder:open-client'),
