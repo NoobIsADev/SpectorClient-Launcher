@@ -359,12 +359,70 @@
 
     <aside class="right-rail">
       <section class="right-panel friends-panel">
-        <div class="right-panel-head"><span>FRIENDS / MESSAGES</span><span class="live-dot"></span></div>
-        <div class="friends-content">
+        <div class="right-panel-head">
+          <span>SPECTOR SATELLITE</span>
+          <button id="socialReconnectBtn" class="social-status-button" title="Reconnect to Spector Satellite">
+            <span id="socialLiveDot" class="live-dot offline"></span>
+            <span id="socialConnectionLabel">OFFLINE</span>
+          </button>
+        </div>
+
+        <div id="socialSignedOut" class="friends-content social-empty-state">
           <div class="friend-orb">S</div>
-          <b>Social panel</b>
-          <p>Coming Soon!</p>
-          <div class="social-placeholder"><span></span><span></span><span></span></div>
+          <b>Friends & Messages</b>
+          <p>Sign in with your Minecraft account to connect to Spector Satellite.</p>
+        </div>
+
+        <div id="socialMain" class="social-main hidden">
+          <div class="social-self-row">
+            <img id="socialSelfAvatar" class="social-avatar" alt="" />
+            <div class="social-self-copy">
+              <b id="socialSelfName">SpectorPlayer</b>
+              <span id="socialSelfStatus">Connecting…</span>
+            </div>
+          </div>
+
+          <div id="socialHome" class="social-home">
+            <div class="social-tabs" role="tablist">
+              <button class="social-tab active" data-social-tab="friends">Friends <span id="socialFriendCount">0</span></button>
+              <button class="social-tab" data-social-tab="requests">Requests <span id="socialRequestCount">0</span></button>
+              <button class="social-tab" data-social-tab="add">Add</button>
+            </div>
+
+            <div class="social-tab-panel active" data-social-panel="friends">
+              <div id="socialFriendsList" class="social-list"></div>
+            </div>
+
+            <div class="social-tab-panel" data-social-panel="requests">
+              <div id="socialRequestsList" class="social-list"></div>
+            </div>
+
+            <div class="social-tab-panel" data-social-panel="add">
+              <form id="socialSearchForm" class="social-search-form">
+                <input id="socialSearchInput" maxlength="32" autocomplete="off" placeholder="Search username…" />
+                <button class="social-send-small" type="submit">Search</button>
+              </form>
+              <div id="socialSearchResults" class="social-list social-search-results"></div>
+            </div>
+          </div>
+
+          <div id="socialChat" class="social-chat hidden">
+            <div class="social-chat-head">
+              <button id="socialChatBackBtn" class="social-icon-button" title="Back">‹</button>
+              <img id="socialChatAvatar" class="social-avatar small" alt="" />
+              <div class="social-chat-person">
+                <b id="socialChatName">Friend</b>
+                <span id="socialChatPresence">Offline</span>
+              </div>
+              <button id="socialRemoveFriendBtn" class="social-icon-button danger" title="Remove friend">×</button>
+            </div>
+            <div id="socialMessages" class="social-messages"></div>
+            <div id="socialTyping" class="social-typing hidden">typing…</div>
+            <form id="socialMessageForm" class="social-message-form">
+              <input id="socialMessageInput" maxlength="1000" autocomplete="off" placeholder="Message…" />
+              <button type="submit" class="social-send-small">Send</button>
+            </form>
+          </div>
         </div>
       </section>
 

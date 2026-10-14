@@ -18,6 +18,20 @@ contextBridge.exposeInMainWorld('launcher', {
   installMod: (gameVersion, projectId) => ipcRenderer.invoke('mods:install', gameVersion, projectId),
   removeMod: (gameVersion, filename) => ipcRenderer.invoke('mods:remove', gameVersion, filename),
 
+  getSocialState: () => ipcRenderer.invoke('social:get-state'),
+  connectSocial: () => ipcRenderer.invoke('social:connect'),
+  reconnectSocial: () => ipcRenderer.invoke('social:reconnect'),
+  searchSocialUsers: (query) => ipcRenderer.invoke('social:search', query),
+  sendFriendRequest: (userId) => ipcRenderer.invoke('social:friend-request', userId),
+  acceptFriendRequest: (userId) => ipcRenderer.invoke('social:friend-accept', userId),
+  denyFriendRequest: (userId) => ipcRenderer.invoke('social:friend-deny', userId),
+  removeFriend: (userId) => ipcRenderer.invoke('social:friend-remove', userId),
+  getMessages: (userId, limit = 50, before = '') => ipcRenderer.invoke('social:get-messages', userId, limit, before),
+  sendMessage: (userId, message) => ipcRenderer.invoke('social:send-message', userId, message),
+  markMessagesRead: (userId) => ipcRenderer.invoke('social:mark-read', userId),
+  setTyping: (userId, typing) => ipcRenderer.invoke('social:typing', userId, typing),
+  setSocialStatus: (statusMessage) => ipcRenderer.invoke('social:set-status', statusMessage),
+
   chooseJava: (major = 25) => ipcRenderer.invoke('dialog:choose-java', major),
   openClientFolder: () => ipcRenderer.invoke('folder:open-client'),
   openModsFolder: (gameVersion) => ipcRenderer.invoke('folder:open-mods', gameVersion),
@@ -43,5 +57,7 @@ contextBridge.exposeInMainWorld('launcher', {
   onUiScale: (callback) => ipcRenderer.on('ui-scale', (_event, data) => callback(data)),
   onLogsCleared: (callback) => ipcRenderer.on('logs-cleared', () => callback()),
   onThemeChanged: (callback) => ipcRenderer.on('theme-changed', (_event, theme) => callback(theme)),
-  onUpdateState: (callback) => ipcRenderer.on('update-state', (_event, data) => callback(data))
+  onUpdateState: (callback) => ipcRenderer.on('update-state', (_event, data) => callback(data)),
+  onSocialState: (callback) => ipcRenderer.on('social-state', (_event, data) => callback(data)),
+  onSocialEvent: (callback) => ipcRenderer.on('social-event', (_event, data) => callback(data))
 });

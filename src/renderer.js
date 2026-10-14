@@ -22,6 +22,26 @@ let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
 
+let socialState = {
+  endpoint: 'http://nyc1.nightly.host:25597',
+  connection: 'disconnected',
+  secure: false,
+  accountId: null,
+  me: null,
+  friends: [],
+  incoming: [],
+  outgoing: [],
+  blocked: [],
+  error: null
+};
+let socialActiveTab = 'friends';
+let socialSearchResults = [];
+let socialChatUserId = null;
+let socialMessages = [];
+let socialTypingTimer = null;
+let socialTypingSent = false;
+let socialConnectAccountId = null;
+
 
 // ---------------------------------------------------------
 // SpectorClient UI sound engine
@@ -275,6 +295,269 @@ async function selectModsVersion(gameVersion) {
   setModTab('install');
 }
 
+
+function socialHeadUrl(user, size = 64) {
+  const id = String(user?.id || user?.uuid || '').trim();
+  return id ? `https://mc-heads.net/avatar/${encodeURIComponent(id)}/${size}` : '';
+}
+
+function socialPresenceInfo(user) {
+  const presence = user?.presence || {};
+  const online = Boolean(presence.online);
+  const status = online ? (presence.status || 'online') : 'offline';
+  const activity = presence.activity || null;
+  const detail = online
+    ? (activity?.text || activity?.server || (status === 'dnd' ? 'Do not disturb' : status === 'idle' ? 'Idle' : 'Online'))
+    : (user?.lastSeen ? 'Offline' : 'Offline');
+  return { online, status, detail, activity };
+}
+
+function socialMessageTime(value) {
+  const date = new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function setSocialTab(tab) {
+  socialActiveTab = ['friends', 'requests', 'add'].includes(tab) ? tab : 'friends';
+  document.querySelectorAll('[data-social-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.socialTab === socialActiveTab);
+  });
+  document.querySelectorAll('[data-social-panel]').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.socialPanel === socialActiveTab);
+  });
+}
+
+function socialFriendById(userId) {
+  return (socialState.friends || []).find((friend) => String(friend.id) === String(userId)) || null;
+}
+
+function renderSocialFriends() {
+  const host = $('socialFriendsList');
+  if (!host) return;
+  const friends = [...(socialState.friends || [])].sort((a, b) => {
+    const ao = socialPresenceInfo(a).online ? 1 : 0;
+    const bo = socialPresenceInfo(b).online ? 1 : 0;
+    return bo - ao || String(a.username || '').localeCompare(String(b.username || ''));
+  });
+  $('socialFriendCount').textContent = String(friends.length);
+
+  if (!friends.length) {
+    host.innerHTML = '<div class="social-empty-mini">No friends yet.<br>Use Add to find another SpectorClient user.</div>';
+    return;
+  }
+
+  host.innerHTML = friends.map((friend) => {
+    const presence = socialPresenceInfo(friend);
+    return `
+      <button class="social-person-row social-open-chat" data-user-id="${escapeHtml(friend.id)}">
+        <span class="social-avatar-wrap">
+          <img class="social-avatar" src="${socialHeadUrl(friend, 64)}" alt="" />
+          <i class="social-presence-dot ${escapeHtml(presence.status)}"></i>
+        </span>
+        <span class="social-person-copy">
+          <b>${escapeHtml(friend.username || 'Unknown')}</b>
+          <span>${escapeHtml(presence.detail)}</span>
+        </span>
+        <span class="chevron">›</span>
+      </button>`;
+  }).join('');
+
+  host.querySelectorAll('.social-open-chat').forEach((button) => {
+    button.addEventListener('click', () => openSocialChat(button.dataset.userId));
+  });
+}
+
+function renderSocialRequests() {
+  const host = $('socialRequestsList');
+  if (!host) return;
+  const incoming = socialState.incoming || [];
+  const outgoing = socialState.outgoing || [];
+  $('socialRequestCount').textContent = String(incoming.length);
+
+  if (!incoming.length && !outgoing.length) {
+    host.innerHTML = '<div class="social-empty-mini">No pending friend requests.</div>';
+    return;
+  }
+
+  const incomingHtml = incoming.map((user) => `
+    <div class="social-person-row">
+      <span class="social-avatar-wrap"><img class="social-avatar" src="${socialHeadUrl(user, 64)}" alt="" /></span>
+      <span class="social-person-copy"><b>${escapeHtml(user.username || 'Unknown')}</b><span>Incoming request</span></span>
+      <span class="social-mini-actions">
+        <button class="social-mini-btn primary social-accept" data-user-id="${escapeHtml(user.id)}">✓</button>
+        <button class="social-mini-btn danger social-deny" data-user-id="${escapeHtml(user.id)}">×</button>
+      </span>
+    </div>`).join('');
+  const outgoingHtml = outgoing.map((user) => `
+    <div class="social-person-row">
+      <span class="social-avatar-wrap"><img class="social-avatar" src="${socialHeadUrl(user, 64)}" alt="" /></span>
+      <span class="social-person-copy"><b>${escapeHtml(user.username || 'Unknown')}</b><span>Request sent</span></span>
+      <span class="social-mini-actions"><span class="hint">PENDING</span></span>
+    </div>`).join('');
+  host.innerHTML = incomingHtml + outgoingHtml;
+
+  host.querySelectorAll('.social-accept').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await window.launcher.acceptFriendRequest(button.dataset.userId); }
+    catch (error) { showToast(error.message); }
+  }));
+  host.querySelectorAll('.social-deny').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await window.launcher.denyFriendRequest(button.dataset.userId); }
+    catch (error) { showToast(error.message); }
+  }));
+}
+
+function renderSocialSearchResults() {
+  const host = $('socialSearchResults');
+  if (!host) return;
+  if (!socialSearchResults.length) {
+    host.innerHTML = '<div class="social-empty-mini">Search for a Minecraft username.</div>';
+    return;
+  }
+
+  host.innerHTML = socialSearchResults.map((user) => {
+    let action = '<button class="social-mini-btn primary social-add-user" data-user-id="' + escapeHtml(user.id) + '">Add</button>';
+    if (user.friendship === 'friends') action = '<button class="social-mini-btn social-open-chat-search" data-user-id="' + escapeHtml(user.id) + '">Message</button>';
+    if (user.friendship === 'outgoing') action = '<span class="hint">PENDING</span>';
+    if (user.friendship === 'incoming') action = '<button class="social-mini-btn primary social-accept-search" data-user-id="' + escapeHtml(user.id) + '">Accept</button>';
+    return `
+      <div class="social-person-row">
+        <span class="social-avatar-wrap"><img class="social-avatar" src="${socialHeadUrl(user, 64)}" alt="" /></span>
+        <span class="social-person-copy"><b>${escapeHtml(user.username || 'Unknown')}</b><span>${escapeHtml(user.friendship === 'friends' ? socialPresenceInfo(user).detail : 'Spector Satellite user')}</span></span>
+        <span class="social-mini-actions">${action}</span>
+      </div>`;
+  }).join('');
+
+  host.querySelectorAll('.social-add-user').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      await window.launcher.sendFriendRequest(button.dataset.userId);
+      showToast('Friend request sent.');
+      socialSearchResults = socialSearchResults.map((user) => String(user.id) === button.dataset.userId ? { ...user, friendship: 'outgoing' } : user);
+      renderSocialSearchResults();
+    } catch (error) { showToast(error.message); button.disabled = false; }
+  }));
+  host.querySelectorAll('.social-accept-search').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await window.launcher.acceptFriendRequest(button.dataset.userId); showToast('Friend request accepted.'); }
+    catch (error) { showToast(error.message); button.disabled = false; }
+  }));
+  host.querySelectorAll('.social-open-chat-search').forEach((button) => button.addEventListener('click', () => openSocialChat(button.dataset.userId)));
+}
+
+function renderSocialMessages() {
+  const host = $('socialMessages');
+  if (!host) return;
+  const meId = String(socialState.me?.id || selectedAccount()?.uuid || '');
+  if (!socialMessages.length) {
+    host.innerHTML = '<div class="social-empty-mini">No messages yet.</div>';
+    return;
+  }
+  host.innerHTML = socialMessages.map((message) => `
+    <div class="social-message ${String(message.from) === meId ? 'mine' : ''}" data-message-id="${escapeHtml(message.id || '')}">
+      ${escapeHtml(message.text || '')}
+      <time>${escapeHtml(socialMessageTime(message.createdAt))}</time>
+    </div>`).join('');
+  host.scrollTop = host.scrollHeight;
+}
+
+function renderSocialChatHeader() {
+  if (!socialChatUserId) return;
+  const friend = socialFriendById(socialChatUserId);
+  if (!friend) {
+    closeSocialChat();
+    return;
+  }
+  const presence = socialPresenceInfo(friend);
+  $('socialChatName').textContent = friend.username || 'Friend';
+  $('socialChatAvatar').src = socialHeadUrl(friend, 64);
+  $('socialChatPresence').textContent = presence.detail;
+}
+
+async function openSocialChat(userId) {
+  const friend = socialFriendById(userId) || socialSearchResults.find((user) => String(user.id) === String(userId));
+  if (!friend || friend.friendship && friend.friendship !== 'friends') return;
+  socialChatUserId = String(userId);
+  socialMessages = [];
+  $('socialHome').classList.add('hidden');
+  $('socialChat').classList.remove('hidden');
+  $('socialMessages').innerHTML = '<div class="social-empty-mini">Loading messages…</div>';
+  renderSocialChatHeader();
+  try {
+    const data = await window.launcher.getMessages(socialChatUserId, 50, '');
+    socialMessages = Array.isArray(data.messages) ? data.messages : [];
+    renderSocialMessages();
+    await window.launcher.markMessagesRead(socialChatUserId).catch(() => {});
+    setTimeout(() => $('socialMessageInput')?.focus(), 50);
+  } catch (error) {
+    $('socialMessages').innerHTML = `<div class="social-empty-mini">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function closeSocialChat() {
+  if (socialChatUserId && socialTypingSent) window.launcher.setTyping(socialChatUserId, false).catch(() => {});
+  socialTypingSent = false;
+  socialChatUserId = null;
+  socialMessages = [];
+  clearTimeout(socialTypingTimer);
+  $('socialTyping')?.classList.add('hidden');
+  $('socialChat')?.classList.add('hidden');
+  $('socialHome')?.classList.remove('hidden');
+}
+
+function renderSocial() {
+  const account = selectedAccount();
+  const connection = socialState.connection || 'disconnected';
+  const dot = $('socialLiveDot');
+  if (dot) {
+    dot.className = 'live-dot ' + (connection === 'online' ? 'online' : connection === 'connecting' ? 'connecting' : connection === 'offline' && socialState.error ? 'error' : 'offline');
+  }
+  if ($('socialConnectionLabel')) $('socialConnectionLabel').textContent = connection === 'signed-out' ? 'SIGN IN' : connection.toUpperCase();
+
+  const showMain = Boolean(account);
+  $('socialSignedOut')?.classList.toggle('hidden', showMain);
+  $('socialMain')?.classList.toggle('hidden', !showMain);
+  if (!showMain) return;
+
+  const me = socialState.me || { id: account.uuid, username: account.name };
+  $('socialSelfAvatar').src = socialHeadUrl(me, 64);
+  $('socialSelfName').textContent = me.username || account.name;
+  let statusText = 'Connecting to Satellite…';
+  if (connection === 'online') statusText = socialState.secure ? 'Satellite connected' : 'Satellite connected • HTTP';
+  if (connection === 'offline') statusText = socialState.error || 'Satellite offline';
+  if (connection === 'disconnected') statusText = 'Satellite disconnected';
+  $('socialSelfStatus').textContent = statusText;
+  $('socialSelfStatus').classList.toggle('social-unsecure-note', connection === 'online' && !socialState.secure);
+
+  renderSocialFriends();
+  renderSocialRequests();
+  renderSocialSearchResults();
+  setSocialTab(socialActiveTab);
+  if (socialChatUserId) renderSocialChatHeader();
+}
+
+async function syncSocialConnection(force = false) {
+  const account = selectedAccount();
+  if (!account) {
+    socialConnectAccountId = null;
+    socialState = { ...socialState, connection: 'signed-out', accountId: null, me: null, friends: [], incoming: [], outgoing: [], blocked: [], error: null };
+    closeSocialChat();
+    renderSocial();
+    return;
+  }
+  if (!force && socialConnectAccountId === account.id && ['online', 'connecting'].includes(socialState.connection)) return;
+  socialConnectAccountId = account.id;
+  try {
+    const next = force ? await window.launcher.reconnectSocial() : await window.launcher.connectSocial();
+    if (next) socialState = next;
+  } catch (error) {
+    socialState = { ...socialState, connection: 'offline', accountId: account.id, error: error.message };
+  }
+  renderSocial();
+}
+
 function showView(name) {
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.classList.remove('active'));
@@ -457,6 +740,7 @@ function renderAllAccountUI() {
   renderAccounts();
   renderAccountDropdown();
   updatePlayState();
+  void syncSocialConnection(false);
 }
 
 const THEME_NAMES = { classic: 'Classic', 'classic-pink': 'Classic Pink', crimson: 'Crimson', prince: 'Prince' };
@@ -1052,6 +1336,113 @@ $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClien
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });
 $('newsHomeBtn').addEventListener('click', () => showView('home'));
 
+$('socialReconnectBtn').addEventListener('click', () => void syncSocialConnection(true));
+document.querySelectorAll('[data-social-tab]').forEach((button) => {
+  button.addEventListener('click', () => setSocialTab(button.dataset.socialTab));
+});
+$('socialSearchForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const query = $('socialSearchInput').value.trim();
+  if (!query) {
+    socialSearchResults = [];
+    renderSocialSearchResults();
+    return;
+  }
+  $('socialSearchResults').innerHTML = '<div class="social-empty-mini">Searching…</div>';
+  try {
+    const result = await window.launcher.searchSocialUsers(query);
+    socialSearchResults = Array.isArray(result.users) ? result.users : [];
+    renderSocialSearchResults();
+  } catch (error) {
+    socialSearchResults = [];
+    $('socialSearchResults').innerHTML = `<div class="social-empty-mini">${escapeHtml(error.message)}</div>`;
+  }
+});
+$('socialChatBackBtn').addEventListener('click', closeSocialChat);
+$('socialRemoveFriendBtn').addEventListener('click', async () => {
+  if (!socialChatUserId) return;
+  const friend = socialFriendById(socialChatUserId);
+  if (!friend) return;
+  if (!window.confirm(`Remove ${friend.username || 'this player'} from your friends?`)) return;
+  try {
+    await window.launcher.removeFriend(socialChatUserId);
+    closeSocialChat();
+    showToast('Friend removed.');
+  } catch (error) { showToast(error.message); }
+});
+$('socialMessageForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!socialChatUserId) return;
+  const input = $('socialMessageInput');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  if (socialTypingSent) {
+    socialTypingSent = false;
+    window.launcher.setTyping(socialChatUserId, false).catch(() => {});
+  }
+  try {
+    const result = await window.launcher.sendMessage(socialChatUserId, message);
+    if (result?.message && !socialMessages.some((entry) => entry.id === result.message.id)) {
+      socialMessages.push(result.message);
+      renderSocialMessages();
+    }
+  } catch (error) {
+    input.value = message;
+    showToast(error.message);
+  }
+});
+$('socialMessageInput').addEventListener('input', () => {
+  if (!socialChatUserId) return;
+  if (!socialTypingSent) {
+    socialTypingSent = true;
+    window.launcher.setTyping(socialChatUserId, true).catch(() => {});
+  }
+  clearTimeout(socialTypingTimer);
+  socialTypingTimer = setTimeout(() => {
+    if (socialChatUserId && socialTypingSent) window.launcher.setTyping(socialChatUserId, false).catch(() => {});
+    socialTypingSent = false;
+  }, 900);
+});
+
+window.launcher.onSocialState((next) => {
+  if (!next) return;
+  socialState = next;
+  const account = selectedAccount();
+  if (account && next.accountId) socialConnectAccountId = account.id;
+  renderSocial();
+});
+window.launcher.onSocialEvent((packet) => {
+  if (!packet?.type) return;
+  if (packet.type === 'message.new' && packet.message) {
+    const message = packet.message;
+    const meId = String(socialState.me?.id || selectedAccount()?.uuid || '');
+    const otherId = String(message.from) === meId ? String(message.to) : String(message.from);
+    if (socialChatUserId && otherId === String(socialChatUserId)) {
+      if (!socialMessages.some((entry) => entry.id === message.id)) {
+        socialMessages.push(message);
+        renderSocialMessages();
+      }
+      if (String(message.to) === meId) window.launcher.markMessagesRead(socialChatUserId).catch(() => {});
+    } else if (String(message.to) === meId) {
+      const sender = socialFriendById(message.from);
+      showToast(`${sender?.username || 'Friend'}: ${String(message.text || '').slice(0, 72)}`, 4200);
+    }
+  }
+  if (packet.type === 'typing' && socialChatUserId && String(packet.userId) === String(socialChatUserId)) {
+    $('socialTyping').classList.toggle('hidden', !packet.typing);
+    if (packet.typing) {
+      clearTimeout(socialTypingTimer);
+      socialTypingTimer = setTimeout(() => $('socialTyping').classList.add('hidden'), 1800);
+    }
+  }
+  if (packet.type === 'friend.request') {
+    showToast(`${packet.from?.username || 'Someone'} sent you a friend request.`, 3600);
+  }
+  if (packet.type === 'friend.accepted') showToast(`${packet.user?.username || 'Friend'} accepted your request.`, 3200);
+  if (packet.type === 'friend.removed' && socialChatUserId && String(packet.userId) === String(socialChatUserId)) closeSocialChat();
+});
+
 window.launcher.onAuthCode((data) => {
   currentAuthUrl = data.directVerificationUri || data.verificationUri;
   $('authModal').classList.remove('hidden');
@@ -1183,20 +1574,23 @@ async function ensureNotificationPermission() {
 
 (async function init() {
   try {
-    const [loadedSettings, loadedClientInfo, gameStatus, logHistory] = await Promise.all([
+    const [loadedSettings, loadedClientInfo, gameStatus, logHistory, loadedSocialState] = await Promise.all([
       window.launcher.getSettings(),
       window.launcher.getClientInfo(),
       window.launcher.getGameStatus(),
-      window.launcher.getLogHistory()
+      window.launcher.getLogHistory(),
+      window.launcher.getSocialState()
     ]);
     settings = loadedSettings;
     clientInfo = loadedClientInfo;
+    if (loadedSocialState) socialState = loadedSocialState;
     gameRunning = Boolean(gameStatus?.running);
     runningGameVersion = gameStatus?.gameVersion || null;
     stoppingGame = false;
     fillSettings();
     renderPlatformPaths();
     renderAllAccountUI();
+    renderSocial();
     if (Array.isArray(logHistory) && logHistory.length) {
       $('logOutput').textContent = logHistory.map((entry) => `[${entry.type || 'launcher'}] ${entry.line || ''}`).join('\n') + '\n';
     }

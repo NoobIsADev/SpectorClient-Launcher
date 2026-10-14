@@ -3,11 +3,13 @@ const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const crypto = require('crypto');
+const http = require('http');
 const https = require('https');
 const { execFile } = require('child_process');
 const { Authflow } = require('prismarine-auth');
 const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
+const WebSocket = require('ws');
 
 // Keep only one SpectorClient process alive. Multiple launcher processes can
 // keep files in the install directory locked and make an in-place update fail.
@@ -36,6 +38,12 @@ const USER_AGENT = `SpectorClient/${app.getVersion()} (Electron Minecraft launch
 const MODRINTH_PAGE_SIZE = 24;
 const UPDATE_REPO_OWNER = 'NoobIsADev';
 const UPDATE_REPO_NAME = 'SpectorClient-Launcher';
+
+// Spector Satellite social backend. The URL can be overridden for testing with
+// SPECTOR_SATELLITE_URL, but production builds target the user's hosted service.
+const SATELLITE_BASE_URL = String(process.env.SPECTOR_SATELLITE_URL || 'http://nyc1.nightly.host:25597').replace(/\/+$/, '');
+const SATELLITE_RECONNECT_MS = 5000;
+const SATELLITE_REQUEST_TIMEOUT_MS = 15000;
 
 // Keep this client completely separate from the normal .minecraft folder.
 const APPDATA_ROOT = process.env.APPDATA
@@ -73,6 +81,29 @@ let lastUpdaterErrorFingerprint = '';
 let lastUpdaterErrorAt = 0;
 let lastNativeUpdateNoticeVersion = '';
 let lastNativeInstallNoticeVersion = '';
+
+// Satellite sessions are intentionally memory-only. They are refreshed from the
+// already signed-in Minecraft account when the launcher starts or the selected
+// account changes.
+let satelliteSessionToken = null;
+let satelliteSessionExpiresAt = 0;
+let satelliteAccountId = null;
+let satelliteSocket = null;
+let satelliteReconnectTimer = null;
+let satelliteConnectPromise = null;
+let satelliteManualDisconnect = false;
+let satelliteState = {
+  endpoint: SATELLITE_BASE_URL,
+  connection: 'disconnected',
+  secure: SATELLITE_BASE_URL.startsWith('https://'),
+  accountId: null,
+  me: null,
+  friends: [],
+  incoming: [],
+  outgoing: [],
+  blocked: [],
+  error: null
+};
 
 // The UI was designed around this content area. The preferred user scale is
 // automatically capped to a fit scale whenever the window is too small.
@@ -1688,6 +1719,354 @@ function request(url, { binary = false, redirects = 8 } = {}) {
   });
 }
 
+
+function satelliteSnapshot() {
+  return makeIpcSafe({ ...satelliteState });
+}
+
+function emitSatelliteState(patch = {}) {
+  satelliteState = { ...satelliteState, ...patch, endpoint: SATELLITE_BASE_URL, secure: SATELLITE_BASE_URL.startsWith('https://') };
+  send('social-state', satelliteSnapshot());
+}
+
+function clearSatelliteReconnect() {
+  if (satelliteReconnectTimer) clearTimeout(satelliteReconnectTimer);
+  satelliteReconnectTimer = null;
+}
+
+function closeSatelliteSocket() {
+  const socket = satelliteSocket;
+  satelliteSocket = null;
+  if (!socket) return;
+  try { socket.removeAllListeners(); } catch {}
+  try { socket.close(1000, 'SpectorClient reconnecting'); } catch {}
+}
+
+function satelliteHttpRequest(route, { method = 'GET', body = null, token = null, timeoutMs = SATELLITE_REQUEST_TIMEOUT_MS } = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(route, `${SATELLITE_BASE_URL}/`);
+    const transport = target.protocol === 'https:' ? https : target.protocol === 'http:' ? http : null;
+    if (!transport) return reject(new Error(`Unsupported Satellite protocol: ${target.protocol}`));
+
+    const payload = body == null ? null : Buffer.from(JSON.stringify(body), 'utf8');
+    const headers = {
+      'User-Agent': USER_AGENT,
+      Accept: 'application/json'
+    };
+    if (payload) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = String(payload.length);
+    }
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const req = transport.request(target, { method, headers }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        text += chunk;
+        if (text.length > 1024 * 1024) req.destroy(new Error('Satellite response was too large.'));
+      });
+      res.on('end', () => {
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; }
+        catch { return reject(new Error(`Satellite returned invalid JSON (HTTP ${res.statusCode || 0}).`)); }
+
+        const status = res.statusCode || 0;
+        if (status < 200 || status >= 300 || data.ok === false) {
+          const error = new Error(data.message || `Satellite request failed with HTTP ${status}.`);
+          error.status = status;
+          error.code = data.error || 'SATELLITE_REQUEST_FAILED';
+          return reject(error);
+        }
+        resolve(data);
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('Satellite connection timed out.')));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function satelliteAuthedRequest(route, options = {}, retry = true) {
+  if (!satelliteSessionToken || satelliteSessionExpiresAt <= Date.now() + 30000) {
+    await connectSatelliteForSelectedAccount({ force: true });
+  }
+  try {
+    return await satelliteHttpRequest(route, { ...options, token: satelliteSessionToken });
+  } catch (error) {
+    if (retry && error?.status === 401) {
+      await connectSatelliteForSelectedAccount({ force: true });
+      return satelliteAuthedRequest(route, options, false);
+    }
+    throw error;
+  }
+}
+
+function updateSatelliteFriend(userId, updater) {
+  const id = String(userId || '');
+  if (!id) return;
+  const friends = (satelliteState.friends || []).map((friend) => {
+    if (String(friend.id) !== id) return friend;
+    return typeof updater === 'function' ? updater(friend) : { ...friend, ...updater };
+  });
+  emitSatelliteState({ friends });
+}
+
+async function refreshSatelliteFriends() {
+  if (!satelliteSessionToken) return satelliteSnapshot();
+  const data = await satelliteAuthedRequest('/v1/friends');
+  emitSatelliteState({
+    connection: satelliteSocket?.readyState === WebSocket.OPEN ? 'online' : satelliteState.connection,
+    friends: Array.isArray(data.friends) ? data.friends : [],
+    incoming: Array.isArray(data.incoming) ? data.incoming : [],
+    outgoing: Array.isArray(data.outgoing) ? data.outgoing : [],
+    blocked: Array.isArray(data.blocked) ? data.blocked : [],
+    error: null
+  });
+  return satelliteSnapshot();
+}
+
+function scheduleSatelliteReconnect(accountId = satelliteAccountId) {
+  clearSatelliteReconnect();
+  if (satelliteManualDisconnect || !accountId) return;
+  satelliteReconnectTimer = setTimeout(async () => {
+    satelliteReconnectTimer = null;
+    const current = await loadSettings().catch(() => null);
+    if (!current || current.selectedAccountId !== accountId) return;
+    connectSatelliteForSelectedAccount({ force: true }).catch(() => {});
+  }, SATELLITE_RECONNECT_MS);
+  satelliteReconnectTimer.unref?.();
+}
+
+async function sendSatellitePresence() {
+  if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) return false;
+  const current = await loadSettings().catch(() => defaultSettings());
+  const gameVersion = activeGameVersion || normalizeGameVersion(current.selectedGameVersion);
+  const activity = activeGameVersion
+    ? {
+        server: String(current.serverAddress || '').trim() || null,
+        version: activeGameVersion,
+        text: `Playing SpectorClient ${activeGameVersion}`
+      }
+    : {
+        server: null,
+        version: gameVersion,
+        text: 'In SpectorClient Launcher'
+      };
+  try {
+    satelliteSocket.send(JSON.stringify({ type: 'presence.set', status: 'online', activity }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function handleSatellitePacket(packet) {
+  if (!packet || typeof packet !== 'object') return;
+  send('social-event', packet);
+
+  if (packet.type === 'hello') {
+    emitSatelliteState({
+      connection: 'online',
+      me: packet.user || satelliteState.me,
+      friends: Array.isArray(packet.friends) ? packet.friends : satelliteState.friends,
+      incoming: Array.isArray(packet.incoming) ? packet.incoming : satelliteState.incoming,
+      outgoing: Array.isArray(packet.outgoing) ? packet.outgoing : satelliteState.outgoing,
+      blocked: Array.isArray(packet.blocked) ? packet.blocked : satelliteState.blocked,
+      error: null
+    });
+    void sendSatellitePresence();
+    return;
+  }
+
+  if (packet.type === 'friends.sync') {
+    emitSatelliteState({
+      friends: Array.isArray(packet.friends) ? packet.friends : [],
+      incoming: Array.isArray(packet.incoming) ? packet.incoming : [],
+      outgoing: Array.isArray(packet.outgoing) ? packet.outgoing : [],
+      blocked: Array.isArray(packet.blocked) ? packet.blocked : [],
+      error: null
+    });
+    return;
+  }
+
+  if (packet.type === 'presence.update') {
+    updateSatelliteFriend(packet.userId, (friend) => ({ ...friend, presence: packet.presence || { online: false, status: 'offline', activity: null } }));
+    return;
+  }
+
+  if (packet.type === 'profile.update' && packet.user?.id) {
+    updateSatelliteFriend(packet.user.id, (friend) => ({ ...friend, ...packet.user }));
+    return;
+  }
+
+  if (packet.type === 'message.new' && packet.message && String(packet.message.to) === String(satelliteState.me?.id || '')) {
+    const sender = (satelliteState.friends || []).find((friend) => String(friend.id) === String(packet.message.from));
+    const preview = String(packet.message.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    showNativeNotification(sender?.username || 'Spector Satellite', preview || 'New message', { kind: 'satellite-message' });
+  }
+  if (packet.type === 'friend.request') {
+    showNativeNotification('Friend Request', `${packet.from?.username || 'Someone'} sent you a SpectorClient friend request.`, { kind: 'satellite-friend-request' });
+  }
+
+  if (['friend.request', 'friend.accepted', 'friend.denied', 'friend.removed'].includes(packet.type)) {
+    refreshSatelliteFriends().catch((error) => log(`[Satellite] Could not refresh friends after ${packet.type}: ${error.message}`, 'debug'));
+  }
+}
+
+async function connectSatelliteRealtime() {
+  if (!satelliteSessionToken) throw new Error('Satellite is not authenticated.');
+  const ticketResponse = await satelliteAuthedRequest('/v1/ws-ticket', { method: 'POST' });
+  if (!ticketResponse.ticket) throw new Error('Satellite did not provide a realtime ticket.');
+
+  closeSatelliteSocket();
+  const wsUrl = new URL(SATELLITE_BASE_URL);
+  wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  wsUrl.pathname = '/v1/ws';
+  wsUrl.search = '';
+  wsUrl.searchParams.set('ticket', ticketResponse.ticket);
+
+  await new Promise((resolve, reject) => {
+    const socket = new WebSocket(wsUrl.toString(), { handshakeTimeout: SATELLITE_REQUEST_TIMEOUT_MS });
+    satelliteSocket = socket;
+    let settled = false;
+
+    const fail = (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error instanceof Error ? error : new Error(String(error || 'Satellite realtime connection failed.')));
+      }
+    };
+
+    socket.once('open', () => {
+      settled = true;
+      emitSatelliteState({ connection: 'online', error: null });
+      void sendSatellitePresence();
+      resolve();
+    });
+    socket.on('message', (raw) => {
+      try { handleSatellitePacket(JSON.parse(String(raw))); }
+      catch (error) { log(`[Satellite] Ignored invalid realtime packet: ${error.message}`, 'debug'); }
+    });
+    socket.on('error', (error) => {
+      if (!settled) fail(error);
+      else log(`[Satellite] Realtime socket error: ${error.message}`, 'debug');
+    });
+    socket.on('close', () => {
+      if (satelliteSocket === socket) satelliteSocket = null;
+      if (!satelliteManualDisconnect && satelliteAccountId) {
+        emitSatelliteState({ connection: 'offline', error: 'Realtime connection lost. Reconnecting…' });
+        scheduleSatelliteReconnect(satelliteAccountId);
+      }
+    });
+  });
+}
+
+function resetSatelliteSession({ signedOut = false } = {}) {
+  clearSatelliteReconnect();
+  closeSatelliteSocket();
+  satelliteSessionToken = null;
+  satelliteSessionExpiresAt = 0;
+  satelliteAccountId = null;
+  emitSatelliteState({
+    connection: signedOut ? 'signed-out' : 'disconnected',
+    accountId: null,
+    me: null,
+    friends: [],
+    incoming: [],
+    outgoing: [],
+    blocked: [],
+    error: null
+  });
+}
+
+async function connectSatelliteForSelectedAccount({ force = false } = {}) {
+  const settings = await loadSettings();
+  const account = settings.accounts.find((entry) => entry.id === settings.selectedAccountId) || null;
+  if (!account) {
+    satelliteManualDisconnect = true;
+    resetSatelliteSession({ signedOut: true });
+    return satelliteSnapshot();
+  }
+
+  if (!force && satelliteAccountId === account.id && satelliteSessionToken && satelliteSocket?.readyState === WebSocket.OPEN) {
+    return satelliteSnapshot();
+  }
+  if (satelliteConnectPromise) {
+    // Account switches can happen while a token exchange is in flight. Let that
+    // request settle, then immediately connect the newly selected account rather
+    // than accidentally keeping the previous account's Satellite session.
+    if (String(satelliteState.accountId || '') !== String(account.id)) {
+      await satelliteConnectPromise.catch(() => {});
+      return connectSatelliteForSelectedAccount({ force: true });
+    }
+    return satelliteConnectPromise;
+  }
+
+  const targetAccountId = account.id;
+  satelliteManualDisconnect = false;
+  clearSatelliteReconnect();
+  closeSatelliteSocket();
+  emitSatelliteState({
+    connection: 'connecting',
+    accountId: targetAccountId,
+    me: satelliteAccountId === targetAccountId ? satelliteState.me : null,
+    friends: satelliteAccountId === targetAccountId ? satelliteState.friends : [],
+    incoming: satelliteAccountId === targetAccountId ? satelliteState.incoming : [],
+    outgoing: satelliteAccountId === targetAccountId ? satelliteState.outgoing : [],
+    blocked: satelliteAccountId === targetAccountId ? satelliteState.blocked : [],
+    error: null
+  });
+
+  satelliteConnectPromise = (async () => {
+    // Refresh the Minecraft token from prismarine-auth, then exchange it for a
+    // Satellite-only token. Satellite tokens never touch settings.json/disk.
+    const minecraftSession = await getMinecraftSession(targetAccountId, false);
+    if (!SATELLITE_BASE_URL.startsWith('https://')) {
+      log('[Satellite] WARNING: Satellite is configured over unencrypted HTTP. Use HTTPS/WSS before deploying to real users.', 'launcher');
+    }
+    const auth = await satelliteHttpRequest('/v1/auth/minecraft', {
+      method: 'POST',
+      token: minecraftSession.token
+    });
+    if (!auth.sessionToken) throw new Error('Satellite authentication did not return a session token.');
+
+    const latestSettings = await loadSettings();
+    if (latestSettings.selectedAccountId !== targetAccountId) throw new Error('Selected account changed during Satellite sign-in.');
+
+    satelliteSessionToken = auth.sessionToken;
+    satelliteSessionExpiresAt = Date.parse(auth.expiresAt || '') || (Date.now() + 30 * 24 * 60 * 60 * 1000);
+    satelliteAccountId = targetAccountId;
+
+    const me = await satelliteAuthedRequest('/v1/me', {}, false);
+    emitSatelliteState({
+      connection: 'connecting',
+      accountId: targetAccountId,
+      me: me.user || auth.user || null,
+      friends: Array.isArray(me.friends) ? me.friends : [],
+      incoming: Array.isArray(me.incoming) ? me.incoming : [],
+      outgoing: Array.isArray(me.outgoing) ? me.outgoing : [],
+      blocked: Array.isArray(me.blocked) ? me.blocked : [],
+      error: null
+    });
+    await connectSatelliteRealtime();
+    log(`[Satellite] Connected as ${auth.user?.username || account.name} to ${SATELLITE_BASE_URL}.`, 'launcher');
+    return satelliteSnapshot();
+  })().catch((error) => {
+    if (satelliteAccountId === targetAccountId || !satelliteAccountId) {
+      emitSatelliteState({ connection: 'offline', accountId: targetAccountId, error: error.message || String(error) });
+      scheduleSatelliteReconnect(targetAccountId);
+    }
+    throw error;
+  }).finally(() => {
+    satelliteConnectPromise = null;
+  });
+
+  return satelliteConnectPromise;
+}
+
 async function downloadFile(url, destination, label, { silent = false } = {}) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') throw new Error(`${label} must use HTTPS.`);
@@ -2429,6 +2808,63 @@ ipcMain.handle('mods:statuses', async (_event, gameVersion, projectIds) => getMo
 ipcMain.handle('mods:install', async (_event, gameVersion, projectId) => installModrinthProject(gameVersion, projectId));
 ipcMain.handle('mods:remove', async (_event, gameVersion, filename) => removeInstalledMod(gameVersion, filename));
 
+
+ipcMain.handle('social:get-state', async () => satelliteSnapshot());
+ipcMain.handle('social:connect', async () => connectSatelliteForSelectedAccount({ force: false }));
+ipcMain.handle('social:reconnect', async () => connectSatelliteForSelectedAccount({ force: true }));
+ipcMain.handle('social:search', async (_event, query) => {
+  const q = String(query || '').trim();
+  if (!q) return { ok: true, users: [] };
+  return satelliteAuthedRequest(`/v1/users/search?q=${encodeURIComponent(q)}`);
+});
+ipcMain.handle('social:friend-request', async (_event, userId) => {
+  const result = await satelliteAuthedRequest('/v1/friends/request', { method: 'POST', body: { userId: String(userId || '') } });
+  await refreshSatelliteFriends();
+  return result;
+});
+ipcMain.handle('social:friend-accept', async (_event, userId) => {
+  const result = await satelliteAuthedRequest('/v1/friends/accept', { method: 'POST', body: { userId: String(userId || '') } });
+  await refreshSatelliteFriends();
+  return result;
+});
+ipcMain.handle('social:friend-deny', async (_event, userId) => {
+  const result = await satelliteAuthedRequest('/v1/friends/deny', { method: 'POST', body: { userId: String(userId || '') } });
+  await refreshSatelliteFriends();
+  return result;
+});
+ipcMain.handle('social:friend-remove', async (_event, userId) => {
+  const result = await satelliteAuthedRequest('/v1/friends/remove', { method: 'POST', body: { userId: String(userId || '') } });
+  await refreshSatelliteFriends();
+  return result;
+});
+ipcMain.handle('social:get-messages', async (_event, userId, limit = 50, before = '') => {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 50));
+  const suffix = before ? `&before=${encodeURIComponent(String(before))}` : '';
+  return satelliteAuthedRequest(`/v1/messages/${encodeURIComponent(String(userId || ''))}?limit=${safeLimit}${suffix}`);
+});
+ipcMain.handle('social:send-message', async (_event, userId, message) => {
+  return satelliteAuthedRequest(`/v1/messages/${encodeURIComponent(String(userId || ''))}`, {
+    method: 'POST',
+    body: { message: String(message || '') }
+  });
+});
+ipcMain.handle('social:mark-read', async (_event, userId) => {
+  return satelliteAuthedRequest(`/v1/messages/${encodeURIComponent(String(userId || ''))}/read`, { method: 'POST' });
+});
+ipcMain.handle('social:typing', async (_event, userId, typing) => {
+  if (!satelliteSocket || satelliteSocket.readyState !== WebSocket.OPEN) return { ok: false, connected: false };
+  satelliteSocket.send(JSON.stringify({ type: 'typing', userId: String(userId || ''), typing: Boolean(typing) }));
+  return { ok: true, connected: true };
+});
+ipcMain.handle('social:set-status', async (_event, statusMessage) => {
+  const result = await satelliteAuthedRequest('/v1/profile/status', {
+    method: 'POST',
+    body: { statusMessage: String(statusMessage || '').slice(0, 120) }
+  });
+  emitSatelliteState({ me: result.user || satelliteState.me });
+  return result;
+});
+
 ipcMain.handle('account:add', async () => {
   const settings = await loadSettings();
   const accountId = crypto.randomUUID();
@@ -2445,6 +2881,7 @@ ipcMain.handle('account:add', async () => {
     settings.accounts = [...settings.accounts.filter((a) => a.uuid !== account.uuid), account];
     settings.selectedAccountId = account.id;
     await saveSettings(settings);
+    setTimeout(() => connectSatelliteForSelectedAccount({ force: true }).catch((error) => log(`[Satellite] Account connect failed: ${error.message}`, 'debug')), 250).unref?.();
     send('auth-state', { state: 'complete', account });
     return account;
   } catch (error) {
@@ -2459,6 +2896,7 @@ ipcMain.handle('account:select', async (_event, accountId) => {
   if (!settings.accounts.some((a) => a.id === accountId)) throw new Error('Account not found.');
   settings.selectedAccountId = accountId;
   await saveSettings(settings);
+  setTimeout(() => connectSatelliteForSelectedAccount({ force: true }).catch((error) => log(`[Satellite] Account switch connect failed: ${error.message}`, 'debug')), 100).unref?.();
   return true;
 });
 
@@ -2468,6 +2906,7 @@ ipcMain.handle('account:remove', async (_event, accountId) => {
   if (settings.selectedAccountId === accountId) settings.selectedAccountId = settings.accounts[0]?.id || null;
   await saveSettings(settings);
   await fsp.rm(launcherDataPath('accounts', accountId), { recursive: true, force: true }).catch(() => {});
+  setTimeout(() => connectSatelliteForSelectedAccount({ force: true }).catch((error) => log(`[Satellite] Account removal reconnect failed: ${error.message}`, 'debug')), 100).unref?.();
   return { ...settings, gameDirectory: APPDATA_ROOT };
 });
 
@@ -2590,6 +3029,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     activeGameVersion = selectedGameVersion;
     gameLaunchInProgress = false;
     send('game-state', { state: 'running', text: `SpectorClient ${selectedGameVersion} is running.`, gameVersion: selectedGameVersion });
+    void sendSatellitePresence();
     showNativeNotification(
       'Minecraft Started',
       `SpectorClient ${selectedGameVersion} has started successfully.`,
@@ -2601,6 +3041,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
       activeGameProcess = null;
       const exitedVersion = activeGameVersion || selectedGameVersion;
       activeGameVersion = null;
+      void sendSatellitePresence();
 
       try {
         await ensureSharedDataForVersion(exitedVersion);
@@ -2698,12 +3139,22 @@ app.whenReady().then(async () => {
     ensureFabricApi(gameVersion, { silent: true }).catch((error) => log(`Fabric API ${gameVersion} startup update check failed: ${error.message}`, 'debug'));
   }, 1200);
 
+  // Connect the social rail after the main launcher is visible. Authentication
+  // reuses the selected Minecraft account and does not require another prompt
+  // while prismarine-auth still has a valid cached Microsoft session.
+  setTimeout(() => {
+    connectSatelliteForSelectedAccount({ force: false }).catch((error) => log(`[Satellite] Startup connect failed: ${error.message}`, 'debug'));
+  }, 1500).unref?.();
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('before-quit', () => {
+  satelliteManualDisconnect = true;
+  clearSatelliteReconnect();
+  closeSatelliteSocket();
   clearUpdaterPolling();
 });
 
