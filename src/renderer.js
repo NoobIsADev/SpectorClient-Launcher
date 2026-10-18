@@ -399,9 +399,7 @@ async function selectModsVersion(gameVersion) {
     ? `<b>${escapeHtml(meta.label)}</b> are shared across every SpectorClient version. Compatibility filter: <b>Minecraft ${escapeHtml(modsTargetVersion)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`
     : `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
   $('modSearchInput').placeholder = `Search ${providerName()} for Minecraft ${modsTargetVersion} ${meta.label.toLowerCase()}...`;
-  $('modBrowseSubtitle').textContent = meta.fabric
-    ? `Fabric + Minecraft ${modsTargetVersion}`
-    : `Global folder • Minecraft ${modsTargetVersion} compatibility`;
+  if ($('modBrowseSubtitle')) $('modBrowseSubtitle').textContent = '';
   $('modManagerStatus').textContent = `Loading installed ${meta.label.toLowerCase()}…`;
   syncContentUiLabels();
   activeModTab = 'install';

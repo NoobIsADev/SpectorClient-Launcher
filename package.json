@@ -1,6 +1,6 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.33",
+  "version": "1.6.35",
   "description": "SpectorClient Electron launcher for Windows and Linux with selectable Minecraft clients, Content management via Modrinth and CurseForge, shared client settings, managed Java runtimes, Satellite friends/messaging, native notifications, and automatic direct-to-latest updates",
   "main": "src/main.js",
   "author": "SpectorClient",

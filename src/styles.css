@@ -2643,3 +2643,18 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
   .content-type-button { font-size: 21px; }
   .content-type-menu { width: min(286px, calc(100vw - 56px)); }
 }
+
+/* ---------------------------------------------------------
+   SpectorClient v1.6.35 - cleaner Content provider header
+   --------------------------------------------------------- */
+/* Search/install progress and API failures are already shown inside the
+   results area/toasts. Keep the duplicate status line out of the Content UI. */
+#modManagerStatus.mod-global-status {
+  display: none !important;
+}
+
+/* With the duplicate status row removed, keep the provider selector tucked
+   directly beneath the Install/Installed tabs. */
+#modInstallPanel .content-provider-switch {
+  margin-top: 0;
+}

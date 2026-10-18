@@ -35,8 +35,11 @@ const BRAND_IMAGE_PATH = path.join(__dirname, 'assets', 'spector-logo.png');
 const FABRIC_API_PROJECT = 'fabric-api';
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 const CURSEFORGE_API = 'https://api.curseforge.com/v1';
+const CURSEFORGE_WEB_API = 'https://www.curseforge.com/api/v1';
 const CURSEFORGE_GAME_ID = 432;
 const CURSEFORGE_PAGE_SIZE = 24;
+const curseForgeProjectCache = new Map();
+let curseForgeCoreRejected = false;
 let runtimeSecrets = {};
 try { runtimeSecrets = JSON.parse(fs.readFileSync(path.join(__dirname, 'runtime-secrets.json'), 'utf8')); } catch {}
 // The API key stays out of the renderer and out of the public source repository.
@@ -1717,7 +1720,13 @@ function request(url, { binary = false, redirects = 8, headers = {} } = {}) {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (chunk) => { body += chunk; });
-        res.on('end', () => reject(new Error(`HTTP ${status} from ${new URL(url).hostname}: ${body.slice(0, 180)}`)));
+        res.on('end', () => {
+          const error = new Error(`HTTP ${status} from ${new URL(url).hostname}: ${body.slice(0, 180)}`);
+          error.status = status;
+          error.body = body;
+          error.url = url;
+          reject(error);
+        });
         return;
       }
       if (binary) {
@@ -2625,10 +2634,43 @@ async function searchModrinthContent(gameVersion, contentType, query, page = 1) 
   };
 }
 
-async function curseForgeRequest(endpoint) {
-  if (!CURSEFORGE_API_KEY) throw new Error('CurseForge is not configured with an API key.');
+function isCurseForgeAuthError(error) {
+  const status = Number(error?.status || 0);
+  return status === 401 || status === 403 || /API Key missing or invalid/i.test(String(error?.message || ''));
+}
+
+async function curseForgeCoreRequest(endpoint) {
+  if (!CURSEFORGE_API_KEY) {
+    const error = new Error('CurseForge Core API key is unavailable.');
+    error.status = 403;
+    throw error;
+  }
   const url = endpoint.startsWith('http') ? endpoint : `${CURSEFORGE_API}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
   return request(url, { headers: { 'x-api-key': CURSEFORGE_API_KEY } });
+}
+
+async function curseForgeWebRequest(endpoint) {
+  const url = endpoint.startsWith('http') ? endpoint : `${CURSEFORGE_WEB_API}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  return request(url, {
+    headers: {
+      Referer: 'https://www.curseforge.com/minecraft/',
+      'Cache-Control': 'no-cache'
+    }
+  });
+}
+
+async function curseForgeRequest(endpoint, { webFallback = true } = {}) {
+  if (!curseForgeCoreRejected) {
+    try {
+      return await curseForgeCoreRequest(endpoint);
+    } catch (error) {
+      if (!isCurseForgeAuthError(error) || !webFallback) throw error;
+      curseForgeCoreRejected = true;
+      log('[Content] CurseForge Core API rejected the bundled key; switching to CurseForge web fallback.', 'launcher');
+    }
+  }
+  if (!webFallback) return curseForgeCoreRequest(endpoint);
+  return curseForgeWebRequest(endpoint);
 }
 
 async function searchCurseForgeContent(gameVersion, contentType, query, page = 1) {
@@ -2651,13 +2693,17 @@ async function searchCurseForgeContent(gameVersion, contentType, query, page = 1
   if (config.fabricOnly) params.set('modLoaderType', '4');
   const data = await curseForgeRequest(`/mods/search?${params.toString()}`);
   const hits = Array.isArray(data?.data) ? data.data : [];
+  for (const hit of hits) {
+    const id = String(hit?.id || '');
+    if (id) curseForgeProjectCache.set(id, hit);
+  }
   const total = Math.max(0, Number(data?.pagination?.totalCount ?? (index + hits.length)) || 0);
   const totalPages = Math.max(1, Math.ceil(total / CURSEFORGE_PAGE_SIZE));
   return {
     provider: 'curseforge', contentType: type, gameVersion: selectedVersion,
     items: hits.map((hit) => ({
       source: 'curseforge', contentType: type, projectId: String(hit.id || ''), slug: hit.slug || '',
-      pageUrl: hit?.links?.websiteUrl || '', title: hit.name || hit.slug || `Untitled ${config.singular}`,
+      pageUrl: hit?.links?.websiteUrl || `https://www.curseforge.com/minecraft/${type === 'mods' ? 'mc-mods' : type === 'resourcepacks' ? 'texture-packs' : 'shaders'}/${encodeURIComponent(hit.slug || '')}`, title: hit.name || hit.slug || `Untitled ${config.singular}`,
       description: hit.summary || '', author: hit?.authors?.[0]?.name || '',
       iconUrl: hit?.logo?.thumbnailUrl || hit?.logo?.url || '', downloads: Number(hit.downloadCount || 0),
       categories: Array.isArray(hit.categories) ? hit.categories.slice(0, 5).map((item) => item?.name || '').filter(Boolean) : []
@@ -2694,22 +2740,63 @@ async function getCompatibleProjectVersion(gameVersion, projectId, preferRelease
 }
 
 async function getCurseForgeProject(projectId) {
-  const data = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}`);
-  return data?.data || null;
+  const id = String(projectId || '');
+  const cached = curseForgeProjectCache.get(id);
+  if (cached) return cached;
+  try {
+    const data = await curseForgeCoreRequest(`/mods/${encodeURIComponent(id)}`);
+    if (data?.data) {
+      curseForgeProjectCache.set(id, data.data);
+      return data.data;
+    }
+  } catch (error) {
+    if (!isCurseForgeAuthError(error)) throw error;
+    curseForgeCoreRejected = true;
+  }
+  return {
+    id: Number(id) || id,
+    name: `CurseForge Project ${id}`,
+    slug: '',
+    links: { websiteUrl: 'https://www.curseforge.com/minecraft' },
+    logo: null
+  };
+}
+
+function curseForgeFileMatches(file, selectedVersion, config) {
+  if (!file || file.isAvailable === false) return false;
+  const versions = Array.isArray(file.gameVersions) ? file.gameVersions.map((v) => String(v).toLowerCase()) : [];
+  if (versions.length && !versions.includes(String(selectedVersion).toLowerCase())) return false;
+  if (config.fabricOnly && versions.length && !versions.some((v) => v === 'fabric' || v.includes('fabric'))) return false;
+  return true;
 }
 
 async function getCompatibleCurseForgeFile(gameVersion, contentType, projectId) {
   const selectedVersion = normalizeGameVersion(gameVersion);
   const type = normalizeContentType(contentType);
   const config = getContentConfig(type);
-  const params = new URLSearchParams({ gameVersion: selectedVersion, pageSize: '50' });
-  if (config.fabricOnly) params.set('modLoaderType', '4');
-  const data = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`);
-  const files = Array.isArray(data?.data) ? data.data.filter((file) => file?.isAvailable !== false) : [];
+  let data;
+  if (!curseForgeCoreRejected) {
+    const params = new URLSearchParams({ gameVersion: selectedVersion, pageSize: '50' });
+    if (config.fabricOnly) params.set('modLoaderType', '4');
+    try {
+      data = await curseForgeCoreRequest(`/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`);
+    } catch (error) {
+      if (!isCurseForgeAuthError(error)) throw error;
+      curseForgeCoreRejected = true;
+      log('[Content] CurseForge file lookup switched to the web fallback.', 'launcher');
+    }
+  }
+  if (!data) {
+    const webParams = new URLSearchParams({
+      pageIndex: '0', pageSize: '50', sort: 'dateCreated', sortDescending: 'true', removeAlphas: 'false'
+    });
+    data = await curseForgeWebRequest(`/mods/${encodeURIComponent(projectId)}/files?${webParams.toString()}`);
+  }
+  const files = Array.isArray(data?.data) ? data.data.filter((file) => curseForgeFileMatches(file, selectedVersion, config)) : [];
   if (!files.length) throw new Error(`No compatible CurseForge ${config.singular} file was found for Minecraft ${selectedVersion}.`);
   files.sort((a, b) => {
     const releaseDelta = Number(a.releaseType || 9) - Number(b.releaseType || 9);
-    return releaseDelta || (new Date(b.fileDate || 0) - new Date(a.fileDate || 0));
+    return releaseDelta || (new Date(b.fileDate || b.dateCreated || 0) - new Date(a.fileDate || a.dateCreated || 0));
   });
   return files[0];
 }
@@ -2875,10 +2962,21 @@ async function installModrinthProject(gameVersion, projectId) {
 }
 
 async function getCurseForgeDownloadUrl(projectId, fileId) {
-  const response = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/download-url`);
-  const url = String(response?.data || '').trim();
-  if (!/^https:\/\//i.test(url)) throw new Error('CurseForge did not return a valid HTTPS download URL.');
-  return url;
+  if (!curseForgeCoreRejected) {
+    try {
+      const response = await curseForgeCoreRequest(`/mods/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/download-url`);
+      const url = String(response?.data || '').trim();
+      if (/^https:\/\//i.test(url)) return { url, useApiKey: true };
+    } catch (error) {
+      if (!isCurseForgeAuthError(error)) throw error;
+      curseForgeCoreRejected = true;
+      log('[Content] CurseForge download switched to the web fallback.', 'launcher');
+    }
+  }
+  return {
+    url: `${CURSEFORGE_WEB_API}/mods/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/download`,
+    useApiKey: false
+  };
 }
 
 async function installCurseForgeContent(gameVersion, contentType, projectId, { dependency = false, visited = new Set() } = {}) {
@@ -2927,8 +3025,10 @@ async function installCurseForgeContent(gameVersion, contentType, projectId, { d
 
   if (!alreadyInstalled) {
     send('mod-install-state', { state: 'downloading', projectId: id, gameVersion: selectedVersion, contentType: type, provider: 'curseforge', text: `Installing ${project.name || filename} from CurseForge…` });
-    const downloadUrl = await getCurseForgeDownloadUrl(id, file.id);
-    await downloadFile(downloadUrl, destination, project.name || filename, { headers: { 'x-api-key': CURSEFORGE_API_KEY } });
+    const download = await getCurseForgeDownloadUrl(id, file.id);
+    await downloadFile(download.url, destination, project.name || filename, {
+      headers: download.useApiKey ? { 'x-api-key': CURSEFORGE_API_KEY } : { Referer: 'https://www.curseforge.com/minecraft/' }
+    });
   }
 
   registry[key] = {
