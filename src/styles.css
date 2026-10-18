@@ -2430,3 +2430,89 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
 /* v1.6.29 - Satellite header presence selector */
 .social-status-button:disabled { cursor: default; opacity: .72; }
 .social-presence-menu button:disabled { cursor: wait; opacity: .62; }
+
+
+/* v1.6.30 - unified Content manager: Mods / Resource Packs / Shaders + provider switch */
+.content-section-head .content-type-select {
+  appearance: none;
+  min-width: 205px;
+  margin: 2px 0 4px;
+  padding: 6px 34px 6px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(var(--accent-rgb), .26);
+  outline: 0;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--theme-soft-2) 50%) calc(100% - 12px) 52% / 5px 5px no-repeat,
+    linear-gradient(135deg, var(--theme-soft-2) 50%, transparent 50%) calc(100% - 7px) 52% / 5px 5px no-repeat,
+    transparent;
+  color: var(--theme-soft-2);
+  font: inherit;
+  font-size: 25px;
+  font-weight: 900;
+  letter-spacing: -.6px;
+  cursor: pointer;
+}
+.content-section-head .content-type-select option {
+  background: rgb(var(--surface-1-rgb));
+  color: var(--theme-soft-2);
+  font-size: 13px;
+  font-weight: 800;
+}
+.content-provider-switch {
+  display: inline-flex;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding: 4px;
+  border: 1px solid rgba(var(--accent-rgb), .14);
+  border-radius: 11px;
+  background: rgba(var(--surface-0-rgb), .55);
+}
+.content-provider-btn {
+  min-width: 118px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--theme-muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .35px;
+  cursor: pointer;
+}
+.content-provider-btn img,
+.content-source-badge img {
+  width: 17px;
+  height: 17px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.content-provider-btn:hover { color: var(--theme-soft-2); background: rgba(var(--accent-rgb), .08); }
+.content-provider-btn.active {
+  border-color: rgba(var(--accent-rgb), .30);
+  background: rgba(var(--accent-rgb), .16);
+  color: var(--theme-soft-2);
+  box-shadow: inset 0 0 14px rgba(var(--accent-rgb), .05);
+}
+.content-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 7px;
+  padding: 2px 5px 2px 3px;
+  border: 1px solid rgba(var(--accent-rgb), .14);
+  border-radius: 7px;
+  color: var(--theme-muted);
+  font-size: 6px;
+  font-weight: 850;
+  vertical-align: middle;
+}
+.content-source-badge img { width: 11px; height: 11px; border-radius: 3px; }
+@media (max-width: 760px) {
+  .content-provider-switch { display: flex; width: 100%; }
+  .content-provider-btn { flex: 1; min-width: 0; }
+  .content-section-head .content-type-select { min-width: 170px; font-size: 21px; }
+}

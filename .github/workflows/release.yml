@@ -46,6 +46,7 @@ jobs:
           node --check src/renderer.js
           node --check src/logs.js
           node --check scripts/fetch-brand.js
+          node --check scripts/prepare-secrets.js
 
       - name: Build Windows updater artifacts
         run: npm run release:win
@@ -115,6 +116,7 @@ jobs:
           node --check src/renderer.js
           node --check src/logs.js
           node --check scripts/fetch-brand.js
+          node --check scripts/prepare-secrets.js
 
       - name: Build Linux AppImage updater artifacts
         run: npm run release:linux

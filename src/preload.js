@@ -18,6 +18,12 @@ contextBridge.exposeInMainWorld('launcher', {
   installMod: (gameVersion, projectId) => ipcRenderer.invoke('mods:install', gameVersion, projectId),
   removeMod: (gameVersion, filename) => ipcRenderer.invoke('mods:remove', gameVersion, filename),
 
+  listContent: (gameVersion, contentType) => ipcRenderer.invoke('content:list', gameVersion, contentType),
+  searchContent: (gameVersion, contentType, provider, query, page = 1) => ipcRenderer.invoke('content:search', gameVersion, contentType, provider, query, page),
+  getContentStatuses: (gameVersion, contentType, provider, projectIds) => ipcRenderer.invoke('content:statuses', gameVersion, contentType, provider, projectIds),
+  installContent: (gameVersion, contentType, provider, projectId) => ipcRenderer.invoke('content:install', gameVersion, contentType, provider, projectId),
+  removeContent: (gameVersion, contentType, filename) => ipcRenderer.invoke('content:remove', gameVersion, contentType, filename),
+
   getSocialState: () => ipcRenderer.invoke('social:get-state'),
   connectSocial: () => ipcRenderer.invoke('social:connect'),
   reconnectSocial: () => ipcRenderer.invoke('social:reconnect'),
@@ -36,6 +42,7 @@ contextBridge.exposeInMainWorld('launcher', {
   chooseJava: (major = 25) => ipcRenderer.invoke('dialog:choose-java', major),
   openClientFolder: () => ipcRenderer.invoke('folder:open-client'),
   openModsFolder: (gameVersion) => ipcRenderer.invoke('folder:open-mods', gameVersion),
+  openContentFolder: (gameVersion, contentType) => ipcRenderer.invoke('folder:open-content', gameVersion, contentType),
   launchGame: (options) => ipcRenderer.invoke('game:launch', options),
   stopGame: () => ipcRenderer.invoke('game:stop'),
   getGameStatus: () => ipcRenderer.invoke('game:get-status'),

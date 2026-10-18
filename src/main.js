@@ -34,6 +34,14 @@ const BRAND_IMAGE_URL = 'https://i.imgur.com/nP9aVFe.png';
 const BRAND_IMAGE_PATH = path.join(__dirname, 'assets', 'spector-logo.png');
 const FABRIC_API_PROJECT = 'fabric-api';
 const MODRINTH_API = 'https://api.modrinth.com/v2';
+const CURSEFORGE_API = 'https://api.curseforge.com/v1';
+const CURSEFORGE_GAME_ID = 432;
+const CURSEFORGE_PAGE_SIZE = 24;
+let runtimeSecrets = {};
+try { runtimeSecrets = JSON.parse(fs.readFileSync(path.join(__dirname, 'runtime-secrets.json'), 'utf8')); } catch {}
+// The API key stays out of the renderer and out of the public source repository.
+// Release builds include the bundled CurseForge API key so Content works with zero setup.
+const CURSEFORGE_API_KEY = String(process.env.CURSEFORGE_API_KEY || runtimeSecrets.curseForgeApiKey || '').trim();
 const USER_AGENT = `SpectorClient/${app.getVersion()} (Electron Minecraft launcher)`;
 const MODRINTH_PAGE_SIZE = 24;
 const UPDATE_REPO_OWNER = 'NoobIsADev';
@@ -1689,19 +1697,20 @@ function setupAutoUpdater() {
   updaterInterval.unref?.();
 }
 
-function request(url, { binary = false, redirects = 8 } = {}) {
+function request(url, { binary = false, redirects = 8, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: {
         'User-Agent': USER_AGENT,
-        Accept: binary ? '*/*' : 'application/json'
+        Accept: binary ? '*/*' : 'application/json',
+        ...headers
       }
     }, (res) => {
       const status = res.statusCode || 0;
       if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirects > 0) {
         res.resume();
         const next = new URL(res.headers.location, url).toString();
-        request(next, { binary, redirects: redirects - 1 }).then(resolve, reject);
+        request(next, { binary, redirects: redirects - 1, headers }).then(resolve, reject);
         return;
       }
       if (status < 200 || status >= 300) {
@@ -2186,7 +2195,7 @@ async function connectSatelliteForSelectedAccount({ force = false } = {}) {
   return satelliteConnectPromise;
 }
 
-async function downloadFile(url, destination, label, { silent = false } = {}) {
+async function downloadFile(url, destination, label, { silent = false, headers = {} } = {}) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:') throw new Error(`${label} must use HTTPS.`);
 
@@ -2197,7 +2206,7 @@ async function downloadFile(url, destination, label, { silent = false } = {}) {
   return new Promise((resolve, reject) => {
     const doDownload = (currentUrl, redirects = 8) => {
       const req = https.get(currentUrl, {
-        headers: { 'User-Agent': USER_AGENT, Accept: '*/*' }
+        headers: { 'User-Agent': USER_AGENT, Accept: '*/*', ...headers }
       }, (res) => {
         const status = res.statusCode || 0;
         if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && redirects > 0) {
@@ -2422,21 +2431,86 @@ async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
 }
 
 // ---------------------------
-// Modrinth mod manager
+// Content manager: Modrinth + CurseForge
 // ---------------------------
 
-async function loadModRegistry(gameVersion = DEFAULT_GAME_VERSION) {
+const CONTENT_TYPES = Object.freeze({
+  mods: {
+    key: 'mods', label: 'Mods', singular: 'mod', modrinthType: 'mod', curseForgeClassId: 6,
+    extensions: ['.jar'], shared: false, folderName: 'mods', fabricOnly: true
+  },
+  resourcepacks: {
+    key: 'resourcepacks', label: 'Resource Packs', singular: 'resource pack', modrinthType: 'resourcepack', curseForgeClassId: 12,
+    extensions: ['.zip'], shared: true, folderName: 'resourcepacks', fabricOnly: false
+  },
+  shaders: {
+    key: 'shaders', label: 'Shaders', singular: 'shader', modrinthType: 'shader', curseForgeClassId: 6552,
+    extensions: ['.zip'], shared: true, folderName: 'shaderpacks', fabricOnly: false
+  }
+});
+
+function normalizeContentType(value) {
+  const key = String(value || '').toLowerCase().replace(/[\s_-]+/g, '');
+  if (key === 'resourcepack' || key === 'resourcepacks') return 'resourcepacks';
+  if (key === 'shader' || key === 'shaders' || key === 'shaderpack' || key === 'shaderpacks') return 'shaders';
+  return 'mods';
+}
+
+function normalizeContentProvider(value) {
+  return String(value || '').toLowerCase() === 'curseforge' ? 'curseforge' : 'modrinth';
+}
+
+function getContentConfig(contentType) {
+  return CONTENT_TYPES[normalizeContentType(contentType)];
+}
+
+function getContentDir(contentType, gameVersion = DEFAULT_GAME_VERSION) {
+  const config = getContentConfig(contentType);
+  return config.shared ? path.join(APPDATA_ROOT, config.folderName) : getModsDir(gameVersion);
+}
+
+function getContentRegistryPath(contentType, gameVersion = DEFAULT_GAME_VERSION) {
+  const type = normalizeContentType(contentType);
+  if (type === 'mods') return getModRegistryPath(gameVersion);
+  return launcherDataPath(`${type}-registry.json`);
+}
+
+function registryStorageKey(contentType, source, projectId) {
+  const type = normalizeContentType(contentType);
+  const provider = normalizeContentProvider(source);
+  const id = String(projectId || '');
+  // Keep the old Modrinth mod registry key format so existing users retain update state.
+  return type === 'mods' && provider === 'modrinth' ? id : `${provider}:${id}`;
+}
+
+function registryEntryFor(registry, contentType, source, projectId) {
+  const provider = normalizeContentProvider(source);
+  const id = String(projectId || '');
+  return registry[registryStorageKey(contentType, provider, id)]
+    || (provider === 'modrinth' ? registry[id] : null)
+    || null;
+}
+
+async function loadContentRegistry(contentType, gameVersion = DEFAULT_GAME_VERSION) {
   await ensureDirs();
   try {
-    const data = JSON.parse(await fsp.readFile(getModRegistryPath(gameVersion), 'utf8'));
+    const data = JSON.parse(await fsp.readFile(getContentRegistryPath(contentType, gameVersion), 'utf8'));
     return data && typeof data === 'object' ? data : {};
   } catch {
     return {};
   }
 }
 
+async function saveContentRegistry(contentType, gameVersion, registry) {
+  await fsp.writeFile(getContentRegistryPath(contentType, gameVersion), JSON.stringify(registry, null, 2));
+}
+
+async function loadModRegistry(gameVersion = DEFAULT_GAME_VERSION) {
+  return loadContentRegistry('mods', gameVersion);
+}
+
 async function saveModRegistry(gameVersion, registry) {
-  await fsp.writeFile(getModRegistryPath(gameVersion), JSON.stringify(registry, null, 2));
+  return saveContentRegistry('mods', gameVersion, registry);
 }
 
 function isCoreModFilename(filename) {
@@ -2444,28 +2518,42 @@ function isCoreModFilename(filename) {
   return lower.startsWith('fabric-api-') || lower === SPECTOR_MOD_FILENAME.toLowerCase() || LEGACY_SPECTOR_MOD_FILENAMES.map((name) => name.toLowerCase()).includes(lower);
 }
 
-async function listInstalledMods(gameVersion = DEFAULT_GAME_VERSION) {
+function contentFilenameAllowed(contentType, filename) {
+  const lower = String(filename || '').toLowerCase();
+  return getContentConfig(contentType).extensions.some((extension) => lower.endsWith(extension));
+}
+
+async function listInstalledContent(gameVersion = DEFAULT_GAME_VERSION, contentType = 'mods') {
   const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
   await ensureDirs();
-  const registry = await loadModRegistry(selectedVersion);
-  const modsDir = getModsDir(selectedVersion);
-  const entries = await fsp.readdir(modsDir, { withFileTypes: true }).catch(() => []);
+  const registry = await loadContentRegistry(type, selectedVersion);
+  const directory = getContentDir(type, selectedVersion);
+  await fsp.mkdir(directory, { recursive: true });
+  const entries = await fsp.readdir(directory, { withFileTypes: true }).catch(() => []);
   const files = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.jar')) continue;
-    const stat = await fsp.stat(path.join(modsDir, entry.name)).catch(() => null);
+    if (type === 'mods' && (!entry.isFile() || !entry.name.toLowerCase().endsWith('.jar'))) continue;
+    if (type !== 'mods' && !entry.isDirectory() && (!entry.isFile() || !contentFilenameAllowed(type, entry.name))) continue;
+    const stat = await fsp.stat(path.join(directory, entry.name)).catch(() => null);
     if (!stat) continue;
     const registered = Object.values(registry).find((item) => item?.filename === entry.name) || null;
+    const source = registered?.source || (registered?.projectId ? 'modrinth' : '');
     files.push({
       filename: entry.name,
-      size: stat.size,
-      core: isCoreModFilename(entry.name),
-      projectId: registered?.projectId || '',
+      size: entry.isFile() ? stat.size : 0,
+      directory: entry.isDirectory(),
+      core: type === 'mods' && isCoreModFilename(entry.name),
+      projectId: registered?.projectId ? String(registered.projectId) : '',
       projectSlug: registered?.projectSlug || '',
-      title: registered?.title || entry.name.replace(/\.jar$/i, ''),
+      pageUrl: registered?.pageUrl || '',
+      source,
+      contentType: type,
+      title: registered?.title || entry.name.replace(/\.(jar|zip)$/i, ''),
       versionNumber: registered?.versionNumber || '',
-      versionId: registered?.versionId || '',
+      versionId: registered?.versionId ? String(registered.versionId) : '',
       iconUrl: registered?.iconUrl || '',
       dependency: Boolean(registered?.dependency),
       gameVersion: selectedVersion
@@ -2476,27 +2564,47 @@ async function listInstalledMods(gameVersion = DEFAULT_GAME_VERSION) {
   return files;
 }
 
-async function searchModrinthMods(gameVersion, query, page = 1) {
+async function listInstalledMods(gameVersion = DEFAULT_GAME_VERSION) {
+  return listInstalledContent(gameVersion, 'mods');
+}
+
+function buildModrinthFacets(gameVersion, contentType) {
   const selectedVersion = normalizeGameVersion(gameVersion);
-  const q = String(query || '').trim().slice(0, 100);
-  const safePage = Math.max(1, Math.min(10000, Number.parseInt(page, 10) || 1));
-  const offset = (safePage - 1) * MODRINTH_PAGE_SIZE;
+  const config = getContentConfig(contentType);
   const facets = [
-    ['project_type:mod'],
-    ['categories:fabric'],
-    [`versions:${selectedVersion}`],
-    [
+    [`project_type:${config.modrinthType}`],
+    [`versions:${selectedVersion}`]
+  ];
+  if (config.fabricOnly) {
+    facets.splice(1, 0, ['categories:fabric']);
+    facets.push([
       'environment:client_and_server',
       'environment:client_only',
       'environment:client_only_server_optional',
       'environment:client_or_server',
       'environment:client_or_server_prefers_both',
       'environment:unknown'
-    ]
-  ];
+    ]);
+  }
+  return facets;
+}
+
+function modrinthPageUrl(contentType, slug) {
+  const config = getContentConfig(contentType);
+  const segment = config.modrinthType === 'resourcepack' ? 'resourcepack' : config.modrinthType;
+  return slug ? `https://modrinth.com/${segment}/${encodeURIComponent(slug)}` : 'https://modrinth.com/';
+}
+
+async function searchModrinthContent(gameVersion, contentType, query, page = 1) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const q = String(query || '').trim().slice(0, 100);
+  const safePage = Math.max(1, Math.min(10000, Number.parseInt(page, 10) || 1));
+  const offset = (safePage - 1) * MODRINTH_PAGE_SIZE;
   const params = new URLSearchParams({
     query: q,
-    facets: JSON.stringify(facets),
+    facets: JSON.stringify(buildModrinthFacets(selectedVersion, type)),
     limit: String(MODRINTH_PAGE_SIZE),
     offset: String(offset),
     index: q ? 'relevance' : 'downloads'
@@ -2506,86 +2614,161 @@ async function searchModrinthMods(gameVersion, query, page = 1) {
   const total = Math.max(0, Number(data?.total_hits ?? (offset + hits.length)) || 0);
   const totalPages = Math.max(1, Math.ceil(total / MODRINTH_PAGE_SIZE));
   return {
-    gameVersion: selectedVersion,
+    provider: 'modrinth', contentType: type, gameVersion: selectedVersion,
     items: hits.map((hit) => ({
-      projectId: hit.project_id,
-      slug: hit.slug || '',
-      title: hit.title || hit.slug || 'Untitled mod',
-      description: hit.description || '',
-      author: hit.author || '',
-      iconUrl: hit.icon_url || '',
-      downloads: Number(hit.downloads || 0),
+      source: 'modrinth', contentType: type, projectId: String(hit.project_id || ''), slug: hit.slug || '',
+      pageUrl: modrinthPageUrl(type, hit.slug || ''), title: hit.title || hit.slug || `Untitled ${config.singular}`,
+      description: hit.description || '', author: hit.author || '', iconUrl: hit.icon_url || '', downloads: Number(hit.downloads || 0),
       categories: Array.isArray(hit.display_categories) ? hit.display_categories.slice(0, 5) : []
     })),
-    total,
-    page: Math.min(safePage, totalPages),
-    pageSize: MODRINTH_PAGE_SIZE,
-    totalPages
+    total, page: Math.min(safePage, totalPages), pageSize: MODRINTH_PAGE_SIZE, totalPages
   };
 }
 
-async function getCompatibleProjectVersion(gameVersion, projectId, preferRelease = true) {
+async function curseForgeRequest(endpoint) {
+  if (!CURSEFORGE_API_KEY) throw new Error('CurseForge is not configured with an API key.');
+  const url = endpoint.startsWith('http') ? endpoint : `${CURSEFORGE_API}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  return request(url, { headers: { 'x-api-key': CURSEFORGE_API_KEY } });
+}
+
+async function searchCurseForgeContent(gameVersion, contentType, query, page = 1) {
   const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const q = String(query || '').trim().slice(0, 100);
+  const safePage = Math.max(1, Math.min(417, Number.parseInt(page, 10) || 1));
+  const index = (safePage - 1) * CURSEFORGE_PAGE_SIZE;
   const params = new URLSearchParams({
-    loaders: JSON.stringify(['fabric']),
+    gameId: String(CURSEFORGE_GAME_ID),
+    classId: String(config.curseForgeClassId),
+    gameVersion: selectedVersion,
+    index: String(index),
+    pageSize: String(CURSEFORGE_PAGE_SIZE),
+    sortField: '2',
+    sortOrder: 'desc'
+  });
+  if (q) params.set('searchFilter', q);
+  if (config.fabricOnly) params.set('modLoaderType', '4');
+  const data = await curseForgeRequest(`/mods/search?${params.toString()}`);
+  const hits = Array.isArray(data?.data) ? data.data : [];
+  const total = Math.max(0, Number(data?.pagination?.totalCount ?? (index + hits.length)) || 0);
+  const totalPages = Math.max(1, Math.ceil(total / CURSEFORGE_PAGE_SIZE));
+  return {
+    provider: 'curseforge', contentType: type, gameVersion: selectedVersion,
+    items: hits.map((hit) => ({
+      source: 'curseforge', contentType: type, projectId: String(hit.id || ''), slug: hit.slug || '',
+      pageUrl: hit?.links?.websiteUrl || '', title: hit.name || hit.slug || `Untitled ${config.singular}`,
+      description: hit.summary || '', author: hit?.authors?.[0]?.name || '',
+      iconUrl: hit?.logo?.thumbnailUrl || hit?.logo?.url || '', downloads: Number(hit.downloadCount || 0),
+      categories: Array.isArray(hit.categories) ? hit.categories.slice(0, 5).map((item) => item?.name || '').filter(Boolean) : []
+    })),
+    total, page: Math.min(safePage, totalPages), pageSize: CURSEFORGE_PAGE_SIZE, totalPages
+  };
+}
+
+async function searchContent(gameVersion, contentType, provider, query, page = 1) {
+  return normalizeContentProvider(provider) === 'curseforge'
+    ? searchCurseForgeContent(gameVersion, contentType, query, page)
+    : searchModrinthContent(gameVersion, contentType, query, page);
+}
+
+async function getCompatibleModrinthProjectVersion(gameVersion, contentType, projectId, preferRelease = true) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const params = new URLSearchParams({
     game_versions: JSON.stringify([selectedVersion]),
     include_changelog: 'false'
   });
+  if (config.fabricOnly) params.set('loaders', JSON.stringify(['fabric']));
   const versions = await request(`${MODRINTH_API}/project/${encodeURIComponent(projectId)}/version?${params.toString()}`);
   if (!Array.isArray(versions) || !versions.length) {
-    throw new Error(`No Fabric ${selectedVersion} version is available for this mod.`);
+    throw new Error(`No compatible Minecraft ${selectedVersion} ${config.singular} version is available.`);
   }
   const sorted = [...versions].sort((a, b) => new Date(b.date_published || 0) - new Date(a.date_published || 0));
   return preferRelease ? (sorted.find((v) => v.version_type === 'release') || sorted[0]) : sorted[0];
 }
 
-async function getModrinthProjectStatuses(gameVersion, projectIds) {
+async function getCompatibleProjectVersion(gameVersion, projectId, preferRelease = true) {
+  return getCompatibleModrinthProjectVersion(gameVersion, 'mods', projectId, preferRelease);
+}
+
+async function getCurseForgeProject(projectId) {
+  const data = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}`);
+  return data?.data || null;
+}
+
+async function getCompatibleCurseForgeFile(gameVersion, contentType, projectId) {
   const selectedVersion = normalizeGameVersion(gameVersion);
-  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : [])
-    .map((id) => String(id || '').trim())
-    .filter((id) => /^[A-Za-z0-9_-]{2,80}$/.test(id)))].slice(0, 60);
-  const registry = await loadModRegistry(selectedVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const params = new URLSearchParams({ gameVersion: selectedVersion, pageSize: '50' });
+  if (config.fabricOnly) params.set('modLoaderType', '4');
+  const data = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`);
+  const files = Array.isArray(data?.data) ? data.data.filter((file) => file?.isAvailable !== false) : [];
+  if (!files.length) throw new Error(`No compatible CurseForge ${config.singular} file was found for Minecraft ${selectedVersion}.`);
+  files.sort((a, b) => {
+    const releaseDelta = Number(a.releaseType || 9) - Number(b.releaseType || 9);
+    return releaseDelta || (new Date(b.fileDate || 0) - new Date(a.fileDate || 0));
+  });
+  return files[0];
+}
+
+async function getContentStatuses(gameVersion, contentType, provider, projectIds) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const source = normalizeContentProvider(provider);
+  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : []).map((id) => String(id || '').trim()).filter(Boolean))].slice(0, 60);
+  const registry = await loadContentRegistry(type, selectedVersion);
   const statuses = {};
-  const concurrency = 6;
   let cursor = 0;
   async function worker() {
     while (cursor < ids.length) {
       const id = ids[cursor++];
-      const installed = registry[id] || null;
+      const installed = registryEntryFor(registry, type, source, id);
       try {
-        const latest = await getCompatibleProjectVersion(selectedVersion, id, id !== FABRIC_API_PROJECT);
+        const latest = source === 'curseforge'
+          ? await getCompatibleCurseForgeFile(selectedVersion, type, id)
+          : await getCompatibleModrinthProjectVersion(selectedVersion, type, id, id !== FABRIC_API_PROJECT);
+        const latestVersionId = source === 'curseforge' ? String(latest?.id || '') : String(latest?.id || '');
+        const latestVersionNumber = source === 'curseforge' ? (latest?.displayName || latest?.fileName || '') : (latest?.version_number || '');
         statuses[id] = {
-          projectId: id,
-          installed: Boolean(installed),
-          installedVersionId: installed?.versionId || '',
-          installedVersionNumber: installed?.versionNumber || '',
-          latestVersionId: latest?.id || '',
-          latestVersionNumber: latest?.version_number || '',
-          updateAvailable: Boolean(installed?.versionId && latest?.id && installed.versionId !== latest.id)
+          projectId: id, source, installed: Boolean(installed),
+          installedVersionId: installed?.versionId ? String(installed.versionId) : '',
+          installedVersionNumber: installed?.versionNumber || '', latestVersionId, latestVersionNumber,
+          updateAvailable: Boolean(installed?.versionId && latestVersionId && String(installed.versionId) !== latestVersionId)
         };
       } catch (error) {
         statuses[id] = {
-          projectId: id,
-          installed: Boolean(installed),
-          installedVersionId: installed?.versionId || '',
-          installedVersionNumber: installed?.versionNumber || '',
-          latestVersionId: '',
-          latestVersionNumber: '',
-          updateAvailable: false,
-          error: error.message
+          projectId: id, source, installed: Boolean(installed),
+          installedVersionId: installed?.versionId ? String(installed.versionId) : '',
+          installedVersionNumber: installed?.versionNumber || '', latestVersionId: '', latestVersionNumber: '',
+          updateAvailable: false, error: error.message
         };
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, ids.length || 1) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(6, ids.length || 1) }, () => worker()));
   return statuses;
 }
 
-function pickVersionJar(version) {
+async function getModrinthProjectStatuses(gameVersion, projectIds) {
+  return getContentStatuses(gameVersion, 'mods', 'modrinth', projectIds);
+}
+
+function pickModrinthContentFile(version, contentType) {
+  const type = normalizeContentType(contentType);
   const files = Array.isArray(version?.files) ? version.files : [];
-  return files.find((f) => f.primary && String(f.filename).toLowerCase().endsWith('.jar') && !f.file_type)
-    || files.find((f) => String(f.filename).toLowerCase().endsWith('.jar') && !f.file_type)
-    || files.find((f) => String(f.filename).toLowerCase().endsWith('.jar'));
+  const config = getContentConfig(type);
+  const allowed = (file) => config.extensions.some((ext) => String(file?.filename || '').toLowerCase().endsWith(ext));
+  return files.find((file) => file.primary && allowed(file) && !file.file_type)
+    || files.find((file) => allowed(file) && !file.file_type)
+    || files.find(allowed)
+    || null;
+}
+
+function pickVersionJar(version) {
+  return pickModrinthContentFile(version, 'mods');
 }
 
 async function resolveRequiredDependencyVersion(gameVersion, dep) {
@@ -2597,122 +2780,209 @@ async function resolveRequiredDependencyVersion(gameVersion, dep) {
     const exactCompatible = (!exactLoaders.length || exactLoaders.includes('fabric'))
       && (!exactGameVersions.length || exactGameVersions.includes(selectedVersion));
     if (exactCompatible) return exact;
-    if (dep.project_id) return getCompatibleProjectVersion(selectedVersion, dep.project_id);
+    if (dep.project_id) return getCompatibleModrinthProjectVersion(selectedVersion, 'mods', dep.project_id);
     throw new Error(`Pinned dependency version is not compatible with Fabric ${selectedVersion}.`);
   }
-  if (dep?.project_id) return getCompatibleProjectVersion(selectedVersion, dep.project_id);
-  if (dep?.file_name) {
-    throw new Error(`Required dependency ${dep.file_name} has no Modrinth project/version ID and cannot be downloaded automatically.`);
-  }
+  if (dep?.project_id) return getCompatibleModrinthProjectVersion(selectedVersion, 'mods', dep.project_id);
+  if (dep?.file_name) throw new Error(`Required dependency ${dep.file_name} has no Modrinth project/version ID and cannot be downloaded automatically.`);
   throw new Error('A required dependency is missing its Modrinth project/version ID.');
 }
 
-async function installModrinthVersion(gameVersion, version, { dependency = false, visited = new Set() } = {}) {
+async function installModrinthContentVersion(gameVersion, contentType, version, { dependency = false, visited = new Set() } = {}) {
   const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
   if (!version?.id) throw new Error('Invalid Modrinth version metadata.');
-  if (visited.has(version.id)) return null;
-  visited.add(version.id);
+  const visitKey = `modrinth:${type}:${version.id}`;
+  if (visited.has(visitKey)) return null;
+  visited.add(visitKey);
 
-  const loaders = Array.isArray(version.loaders) ? version.loaders : [];
-  const gameVersions = Array.isArray(version.game_versions) ? version.game_versions : [];
-  if (loaders.length && !loaders.includes('fabric')) throw new Error('A required dependency is not available for Fabric.');
-  if (gameVersions.length && !gameVersions.includes(selectedVersion)) throw new Error(`A required dependency is not compatible with Minecraft ${selectedVersion}.`);
-
-  const requiredDependencies = (version.dependencies || []).filter((d) => d.dependency_type === 'required');
-  for (const dep of requiredDependencies) {
-    try {
+  if (type === 'mods') {
+    const loaders = Array.isArray(version.loaders) ? version.loaders : [];
+    const gameVersions = Array.isArray(version.game_versions) ? version.game_versions : [];
+    if (loaders.length && !loaders.includes('fabric')) throw new Error('A required dependency is not available for Fabric.');
+    if (gameVersions.length && !gameVersions.includes(selectedVersion)) throw new Error(`A required dependency is not compatible with Minecraft ${selectedVersion}.`);
+    const requiredDependencies = (version.dependencies || []).filter((d) => d.dependency_type === 'required');
+    for (const dep of requiredDependencies) {
       const depVersion = await resolveRequiredDependencyVersion(selectedVersion, dep);
-      send('mod-install-state', {
-        state: 'dependency',
-        projectId: version.project_id,
-        dependencyProjectId: depVersion?.project_id || dep.project_id || '',
-        gameVersion: selectedVersion,
-        text: `Installing required dependency for ${selectedVersion}…`
-      });
-      await installModrinthVersion(selectedVersion, depVersion, { dependency: true, visited });
-    } catch (error) {
-      throw new Error(`Could not install a required dependency: ${error.message}`);
+      send('mod-install-state', { state: 'dependency', projectId: version.project_id, dependencyProjectId: depVersion?.project_id || dep.project_id || '', gameVersion: selectedVersion, contentType: type, text: `Installing required dependency for ${selectedVersion}…` });
+      await installModrinthContentVersion(selectedVersion, 'mods', depVersion, { dependency: true, visited });
     }
   }
 
   const project = await request(`${MODRINTH_API}/project/${encodeURIComponent(version.project_id)}`);
-  if (project?.slug === FABRIC_API_PROJECT) {
+  if (type === 'mods' && project?.slug === FABRIC_API_PROJECT) {
     await ensureFabricApi(selectedVersion);
-    return { title: project.title || 'Fabric API', core: true };
+    return { title: project.title || 'Fabric API', core: true, source: 'modrinth', projectId: FABRIC_API_PROJECT };
   }
 
-  const file = pickVersionJar(version);
-  if (!file?.url || !file?.filename) throw new Error('This Modrinth version does not contain an installable JAR.');
+  const file = pickModrinthContentFile(version, type);
+  if (!file?.url || !file?.filename) throw new Error(`This Modrinth ${config.singular} version does not contain an installable ${config.extensions.join('/')} file.`);
   const filename = path.basename(file.filename);
-  const modsDir = getModsDir(selectedVersion);
-  const destination = path.join(modsDir, filename);
-  const registry = await loadModRegistry(selectedVersion);
-  const registryKey = String(version.project_id);
-  const previous = registry[registryKey];
+  const directory = getContentDir(type, selectedVersion);
+  const destination = path.join(directory, filename);
+  const registry = await loadContentRegistry(type, selectedVersion);
+  const key = registryStorageKey(type, 'modrinth', version.project_id);
+  const previous = registry[key] || (type === 'mods' ? registry[String(version.project_id)] : null);
 
-  if (previous?.filename && previous.filename !== filename && !isCoreModFilename(previous.filename)) {
-    await fsp.rm(path.join(modsDir, path.basename(previous.filename)), { force: true }).catch(() => {});
+  if (previous?.filename && previous.filename !== filename && !(type === 'mods' && isCoreModFilename(previous.filename))) {
+    await fsp.rm(path.join(directory, path.basename(previous.filename)), { force: true, recursive: true }).catch(() => {});
   }
 
   let alreadyInstalled = false;
   try {
     const stat = await fsp.stat(destination);
-    alreadyInstalled = previous?.versionId === version.id
-      && stat.size > 0
-      && (!file.size || stat.size === Number(file.size));
+    alreadyInstalled = previous?.versionId === version.id && stat.size > 0 && (!file.size || stat.size === Number(file.size));
   } catch {}
 
   if (!alreadyInstalled) {
-    send('mod-install-state', { state: 'downloading', projectId: version.project_id, gameVersion: selectedVersion, text: `Installing ${project?.title || filename} for ${selectedVersion}…` });
+    send('mod-install-state', { state: 'downloading', projectId: version.project_id, gameVersion: selectedVersion, contentType: type, provider: 'modrinth', text: `Installing ${project?.title || filename} from Modrinth…` });
     await downloadFile(file.url, destination, project?.title || filename);
   }
 
-  registry[registryKey] = {
-    projectId: version.project_id,
-    projectSlug: project?.slug || '',
-    title: project?.title || filename.replace(/\.jar$/i, ''),
-    iconUrl: project?.icon_url || '',
-    filename,
-    versionId: version.id,
-    versionNumber: version.version_number || '',
-    dependency: Boolean(dependency),
-    installedAt: new Date().toISOString()
+  registry[key] = {
+    source: 'modrinth', contentType: type, projectId: String(version.project_id), projectSlug: project?.slug || '',
+    pageUrl: modrinthPageUrl(type, project?.slug || ''), title: project?.title || filename.replace(/\.(jar|zip)$/i, ''),
+    iconUrl: project?.icon_url || '', filename, versionId: String(version.id), versionNumber: version.version_number || '',
+    dependency: Boolean(dependency), installedAt: previous?.installedAt || new Date().toISOString(), updatedAt: new Date().toISOString()
   };
-  await saveModRegistry(selectedVersion, registry);
-  log(`${alreadyInstalled ? 'Verified' : 'Installed'} ${selectedVersion} Modrinth mod: ${registry[registryKey].title} ${registry[registryKey].versionNumber}`);
-  return registry[registryKey];
+  if (key !== String(version.project_id) && registry[String(version.project_id)]?.source === 'modrinth') delete registry[String(version.project_id)];
+  await saveContentRegistry(type, selectedVersion, registry);
+  log(`${alreadyInstalled ? 'Verified' : 'Installed'} ${selectedVersion} Modrinth ${config.singular}: ${registry[key].title} ${registry[key].versionNumber}`);
+  return registry[key];
+}
+
+async function installModrinthContent(gameVersion, contentType, projectId) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const id = String(projectId || '').trim();
+  if (!/^[A-Za-z0-9_-]{2,80}$/.test(id)) throw new Error('Invalid Modrinth project ID.');
+  if (type === 'mods') await ensureFabricApi(selectedVersion, { silent: true });
+  const registryBefore = await loadContentRegistry(type, selectedVersion);
+  const previous = registryEntryFor(registryBefore, type, 'modrinth', id);
+  send('mod-install-state', { state: 'resolving', projectId: id, gameVersion: selectedVersion, contentType: type, provider: 'modrinth', text: `Finding a compatible Modrinth ${config.singular} for ${selectedVersion}…` });
+  const version = await getCompatibleModrinthProjectVersion(selectedVersion, type, id);
+  const installed = await installModrinthContentVersion(selectedVersion, type, version, { dependency: false, visited: new Set() });
+  const action = previous ? (String(previous.versionId) === String(version.id) ? 'verified' : 'updated') : 'installed';
+  send('mod-install-state', { state: 'complete', projectId: id, gameVersion: selectedVersion, contentType: type, provider: 'modrinth', text: `${installed?.title || config.label} ${action} from Modrinth.` });
+  return { installed, action, gameVersion: selectedVersion, contentType: type, provider: 'modrinth', items: await listInstalledContent(selectedVersion, type) };
 }
 
 async function installModrinthProject(gameVersion, projectId) {
-  const selectedVersion = normalizeGameVersion(gameVersion);
-  const id = String(projectId || '').trim();
-  if (!/^[A-Za-z0-9_-]{2,80}$/.test(id)) throw new Error('Invalid Modrinth project ID.');
-  await ensureFabricApi(selectedVersion, { silent: true });
-  const registryBefore = await loadModRegistry(selectedVersion);
-  const previous = registryBefore[id] || null;
-  send('mod-install-state', { state: 'resolving', projectId: id, gameVersion: selectedVersion, text: `Finding a Fabric ${selectedVersion} build and required dependencies…` });
-  const version = await getCompatibleProjectVersion(selectedVersion, id);
-  const installed = await installModrinthVersion(selectedVersion, version, { dependency: false, visited: new Set() });
-  const action = previous ? (previous.versionId === version.id ? 'verified' : 'updated') : 'installed';
-  const verb = action === 'updated' ? 'updated' : action === 'verified' ? 'verified' : 'installed';
-  send('mod-install-state', { state: 'complete', projectId: id, gameVersion: selectedVersion, text: `${installed?.title || 'Mod'} ${verb} for ${selectedVersion}; required dependencies checked.` });
-  return { installed, action, gameVersion: selectedVersion, mods: await listInstalledMods(selectedVersion) };
+  const result = await installModrinthContent(gameVersion, 'mods', projectId);
+  return { ...result, mods: result.items };
 }
 
-async function removeInstalledMod(gameVersion, filename) {
-  const selectedVersion = normalizeGameVersion(gameVersion);
-  const safeName = path.basename(String(filename || ''));
-  if (!safeName.toLowerCase().endsWith('.jar') || safeName !== String(filename || '')) throw new Error('Invalid mod filename.');
-  if (isCoreModFilename(safeName)) throw new Error('Fabric API and SpectorClient are required core mods and cannot be removed here.');
+async function getCurseForgeDownloadUrl(projectId, fileId) {
+  const response = await curseForgeRequest(`/mods/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/download-url`);
+  const url = String(response?.data || '').trim();
+  if (!/^https:\/\//i.test(url)) throw new Error('CurseForge did not return a valid HTTPS download URL.');
+  return url;
+}
 
-  await fsp.rm(path.join(getModsDir(selectedVersion), safeName), { force: true });
-  const registry = await loadModRegistry(selectedVersion);
+async function installCurseForgeContent(gameVersion, contentType, projectId, { dependency = false, visited = new Set() } = {}) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const config = getContentConfig(type);
+  const id = String(projectId || '').trim();
+  if (!/^\d{1,12}$/.test(id)) throw new Error('Invalid CurseForge project ID.');
+  const visitKey = `curseforge:${type}:${id}`;
+  if (visited.has(visitKey)) return null;
+  visited.add(visitKey);
+  if (type === 'mods' && !dependency) await ensureFabricApi(selectedVersion, { silent: true });
+
+  const project = await getCurseForgeProject(id);
+  if (!project) throw new Error('CurseForge project metadata was unavailable.');
+  if (type === 'mods' && String(project.slug || '').toLowerCase() === FABRIC_API_PROJECT) {
+    await ensureFabricApi(selectedVersion);
+    return { title: project.name || 'Fabric API', core: true, source: 'modrinth', projectId: FABRIC_API_PROJECT };
+  }
+  const file = await getCompatibleCurseForgeFile(selectedVersion, type, id);
+
+  if (type === 'mods') {
+    const requiredDeps = (Array.isArray(file.dependencies) ? file.dependencies : []).filter((dep) => Number(dep?.relationType) === 3 && dep?.modId);
+    for (const dep of requiredDeps) {
+      send('mod-install-state', { state: 'dependency', projectId: id, dependencyProjectId: String(dep.modId), gameVersion: selectedVersion, contentType: type, provider: 'curseforge', text: `Installing required CurseForge dependency for ${selectedVersion}…` });
+      await installCurseForgeContent(selectedVersion, 'mods', String(dep.modId), { dependency: true, visited });
+    }
+  }
+
+  const filename = path.basename(String(file.fileName || ''));
+  if (!filename || !contentFilenameAllowed(type, filename)) throw new Error(`The selected CurseForge file is not a supported ${config.extensions.join('/')} file.`);
+  const directory = getContentDir(type, selectedVersion);
+  const destination = path.join(directory, filename);
+  const registry = await loadContentRegistry(type, selectedVersion);
+  const key = registryStorageKey(type, 'curseforge', id);
+  const previous = registry[key] || null;
+  if (previous?.filename && previous.filename !== filename) {
+    await fsp.rm(path.join(directory, path.basename(previous.filename)), { force: true, recursive: true }).catch(() => {});
+  }
+
+  let alreadyInstalled = false;
+  try {
+    const stat = await fsp.stat(destination);
+    alreadyInstalled = String(previous?.versionId || '') === String(file.id || '') && stat.size > 0 && (!file.fileLength || stat.size === Number(file.fileLength));
+  } catch {}
+
+  if (!alreadyInstalled) {
+    send('mod-install-state', { state: 'downloading', projectId: id, gameVersion: selectedVersion, contentType: type, provider: 'curseforge', text: `Installing ${project.name || filename} from CurseForge…` });
+    const downloadUrl = await getCurseForgeDownloadUrl(id, file.id);
+    await downloadFile(downloadUrl, destination, project.name || filename, { headers: { 'x-api-key': CURSEFORGE_API_KEY } });
+  }
+
+  registry[key] = {
+    source: 'curseforge', contentType: type, projectId: id, projectSlug: project.slug || '',
+    pageUrl: project?.links?.websiteUrl || '', title: project.name || filename.replace(/\.(jar|zip)$/i, ''),
+    iconUrl: project?.logo?.thumbnailUrl || project?.logo?.url || '', filename, versionId: String(file.id || ''),
+    versionNumber: file.displayName || file.fileName || '', dependency: Boolean(dependency),
+    installedAt: previous?.installedAt || new Date().toISOString(), updatedAt: new Date().toISOString()
+  };
+  await saveContentRegistry(type, selectedVersion, registry);
+  log(`${alreadyInstalled ? 'Verified' : 'Installed'} ${selectedVersion} CurseForge ${config.singular}: ${registry[key].title}`);
+  return registry[key];
+}
+
+async function installContent(gameVersion, contentType, provider, projectId) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const source = normalizeContentProvider(provider);
+  const registryBefore = await loadContentRegistry(type, selectedVersion);
+  const previous = registryEntryFor(registryBefore, type, source, projectId);
+  const installed = source === 'curseforge'
+    ? await installCurseForgeContent(selectedVersion, type, projectId, { dependency: false, visited: new Set() })
+    : (await installModrinthContent(selectedVersion, type, projectId)).installed;
+  const latestVersionId = installed?.versionId ? String(installed.versionId) : '';
+  const action = previous ? (String(previous.versionId || '') === latestVersionId ? 'verified' : 'updated') : 'installed';
+  return { installed, action, gameVersion: selectedVersion, contentType: type, provider: source, items: await listInstalledContent(selectedVersion, type) };
+}
+
+async function removeInstalledContent(gameVersion, contentType, filename) {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  const safeName = path.basename(String(filename || ''));
+  if (!safeName || safeName !== String(filename || '')) throw new Error('Invalid content filename.');
+  if (type === 'mods') {
+    if (!safeName.toLowerCase().endsWith('.jar')) throw new Error('Invalid mod filename.');
+    if (isCoreModFilename(safeName)) throw new Error('Fabric API and SpectorClient are required core mods and cannot be removed here.');
+  }
+  const directory = getContentDir(type, selectedVersion);
+  await fsp.rm(path.join(directory, safeName), { force: true, recursive: true });
+  const registry = await loadContentRegistry(type, selectedVersion);
   for (const [key, item] of Object.entries(registry)) {
     if (item?.filename === safeName) delete registry[key];
   }
-  await saveModRegistry(selectedVersion, registry);
-  log(`Removed ${selectedVersion} mod: ${safeName}`);
-  return listInstalledMods(selectedVersion);
+  await saveContentRegistry(type, selectedVersion, registry);
+  log(`Removed ${selectedVersion} ${getContentConfig(type).singular}: ${safeName}`);
+  return listInstalledContent(selectedVersion, type);
+}
+
+async function removeInstalledMod(gameVersion, filename) {
+  return removeInstalledContent(gameVersion, 'mods', filename);
+}
+
+async function searchModrinthMods(gameVersion, query, page = 1) {
+  return searchModrinthContent(gameVersion, 'mods', query, page);
 }
 
 // ---------------------------
@@ -2860,6 +3130,8 @@ ipcMain.handle('client:info', async () => ({
     gameVersion,
     label: CLIENT_PROFILES[gameVersion].label,
     modsDirectory: getModsDir(gameVersion),
+    resourcepacksDirectory: getContentDir('resourcepacks', gameVersion),
+    shadersDirectory: getContentDir('shaders', gameVersion),
     modUrl: CLIENT_PROFILES[gameVersion].modUrl,
     javaMajor: CLIENT_PROFILES[gameVersion].javaMajor
   })),
@@ -2919,14 +3191,31 @@ ipcMain.handle('folder:open-mods', async (_event, gameVersion) => {
   await shell.openPath(getModsDir(selectedVersion));
   return true;
 });
-
-ipcMain.handle('mods:list', async (_event, gameVersion) => {
+ipcMain.handle('folder:open-content', async (_event, gameVersion, contentType) => {
   const selectedVersion = normalizeGameVersion(gameVersion);
-  await ensureFabricApi(selectedVersion, { silent: true }).catch((error) => log(`Fabric API ${selectedVersion} mod-list update check failed: ${error.message}`, 'debug'));
-  return listInstalledMods(selectedVersion);
+  const type = normalizeContentType(contentType);
+  await ensureDirs();
+  const directory = getContentDir(type, selectedVersion);
+  await fsp.mkdir(directory, { recursive: true });
+  await shell.openPath(directory);
+  return true;
 });
-ipcMain.handle('mods:search', async (_event, gameVersion, query, page) => searchModrinthMods(gameVersion, query, page));
-ipcMain.handle('mods:statuses', async (_event, gameVersion, projectIds) => getModrinthProjectStatuses(gameVersion, projectIds));
+
+ipcMain.handle('content:list', async (_event, gameVersion, contentType) => {
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const type = normalizeContentType(contentType);
+  if (type === 'mods') await ensureFabricApi(selectedVersion, { silent: true }).catch((error) => log(`Fabric API ${selectedVersion} content-list update check failed: ${error.message}`, 'debug'));
+  return listInstalledContent(selectedVersion, type);
+});
+ipcMain.handle('content:search', async (_event, gameVersion, contentType, provider, query, page) => searchContent(gameVersion, contentType, provider, query, page));
+ipcMain.handle('content:statuses', async (_event, gameVersion, contentType, provider, projectIds) => getContentStatuses(gameVersion, contentType, provider, projectIds));
+ipcMain.handle('content:install', async (_event, gameVersion, contentType, provider, projectId) => installContent(gameVersion, contentType, provider, projectId));
+ipcMain.handle('content:remove', async (_event, gameVersion, contentType, filename) => removeInstalledContent(gameVersion, contentType, filename));
+
+// Backward-compatible Modrinth mod IPC names used by older renderer builds.
+ipcMain.handle('mods:list', async (_event, gameVersion) => listInstalledContent(gameVersion, 'mods'));
+ipcMain.handle('mods:search', async (_event, gameVersion, query, page) => searchModrinthContent(gameVersion, 'mods', query, page));
+ipcMain.handle('mods:statuses', async (_event, gameVersion, projectIds) => getContentStatuses(gameVersion, 'mods', 'modrinth', projectIds));
 ipcMain.handle('mods:install', async (_event, gameVersion, projectId) => installModrinthProject(gameVersion, projectId));
 ipcMain.handle('mods:remove', async (_event, gameVersion, filename) => removeInstalledMod(gameVersion, filename));
 

@@ -21,7 +21,7 @@
         <button class="rail-btn active" data-view="home" title="Play" aria-label="Play">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2L18.5 12 8 5.4Z"/></svg>
         </button>
-        <button class="rail-btn" data-view="mods" title="Mods" aria-label="Mods">
+        <button class="rail-btn" data-view="mods" title="Content" aria-label="Content">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8v3h3v5h-3v2h3v5h-3v3H8v-3H5v-5h3v-2H5V6h3V3Zm2 5v8h4V8h-4Z"/></svg>
         </button>
         <button class="rail-btn" data-view="accounts" title="Accounts" aria-label="Accounts">
@@ -147,11 +147,15 @@
       </section>
 
       <section id="view-mods" class="view scroll-view">
-        <div class="section-head">
+        <div class="section-head content-section-head">
           <div>
-            <div class="overline">MOD MANAGER</div>
-            <h2>Mods</h2>
-            <p id="modsDescription">Select a SpectorClient version first. Each version has its own mods folder and Modrinth library.</p>
+            <div class="overline">CONTENT MANAGER</div>
+            <select id="contentTypeSelect" class="content-type-select" aria-label="Content type">
+              <option value="mods">Mods</option>
+              <option value="resourcepacks">Resource Packs</option>
+              <option value="shaders">Shaders</option>
+            </select>
+            <p id="modsDescription">Manage compatible Minecraft content from Modrinth or CurseForge.</p>
           </div>
           <button id="openModsFolderBtn" class="secondary-btn" disabled>Open mods folder</button>
         </div>
@@ -159,8 +163,8 @@
         <div id="modVersionChooser" class="mod-version-chooser">
           <div class="mod-version-heading">
             <span class="version-card-kicker">CHOOSE VERSION</span>
-            <h3>Which SpectorClient mods do you want to manage?</h3>
-            <p>Each SpectorClient version has its own isolated mods folder.</p>
+            <h3 id="contentVersionQuestion">Which SpectorClient version do you want to browse for?</h3>
+            <p id="contentVersionHint">Content is filtered to the selected Minecraft version.</p>
           </div>
           <div class="mod-version-grid">
             <button class="mod-version-card" data-mod-game-version="26.2">
@@ -191,6 +195,16 @@
           <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
 
           <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
+            <div class="content-provider-switch" role="tablist" aria-label="Content provider">
+              <button class="content-provider-btn active" data-content-provider="modrinth" role="tab" aria-selected="true">
+                <img src="https://modrinth.com/favicon.ico" alt="" />
+                <span>Modrinth</span>
+              </button>
+              <button class="content-provider-btn" data-content-provider="curseforge" role="tab" aria-selected="false">
+                <img src="https://www.curseforge.com/favicon.ico" alt="" />
+                <span>CurseForge</span>
+              </button>
+            </div>
             <div class="mods-toolbar">
               <div class="search-box">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
@@ -200,17 +214,17 @@
             </div>
 
             <div class="mod-section-title browser-title">
-              <div><h3>Browse Modrinth</h3><span id="modBrowseSubtitle">Fabric-compatible mods</span></div>
+              <div><h3 id="contentBrowseTitle">Browse Modrinth</h3><span id="modBrowseSubtitle">Fabric-compatible mods</span></div>
             </div>
             <div id="modSearchResults" class="mod-results">
               <div class="empty-state compact-empty"><b>Select a version</b><span>Choose 26.2, 26.3, or 1.21.11 to browse compatible mods.</span></div>
             </div>
-            <div id="modPagination" class="mod-pagination hidden" aria-label="Modrinth result pages"></div>
+            <div id="modPagination" class="mod-pagination hidden" aria-label="Content result pages"></div>
           </div>
 
           <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed">
             <div class="mod-section-title installed-tab-title">
-              <div><h3>Installed Mods</h3><span id="installedCount">0 mods</span></div>
+              <div><h3 id="installedContentTitle">Installed Mods</h3><span id="installedCount">0 mods</span></div>
               <button id="refreshModsBtn" class="text-btn">Refresh</button>
             </div>
             <div id="installedMods" class="installed-list"></div>

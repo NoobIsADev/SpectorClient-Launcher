@@ -18,6 +18,8 @@ let modSearchPageSize = 24;
 let modSearchQuery = '';
 let activeModTab = 'install';
 let modsTargetVersion = null;
+let activeContentType = 'mods';
+let contentProvider = 'modrinth';
 let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
@@ -239,7 +241,9 @@ function gameVersionDetails(gameVersion) {
   return clientInfo?.supportedVersions?.find((entry) => entry.gameVersion === selected) || {
     gameVersion: selected,
     label: `SpectorClient ${selected}`,
-    modsDirectory: `SpectorClient data/instances/${selected}/mods`
+    modsDirectory: `SpectorClient data/instances/${selected}/mods`,
+    resourcepacksDirectory: 'SpectorClient data/resourcepacks',
+    shadersDirectory: 'SpectorClient data/shaderpacks'
   };
 }
 
@@ -251,6 +255,58 @@ function renderSelectedVersionUI() {
     button.classList.toggle('selected', button.dataset.gameVersion === gameVersion);
   });
   updatePlayState();
+}
+
+const CONTENT_UI = Object.freeze({
+  mods: { label: 'Mods', singular: 'mod', folderName: 'mods', fabric: true },
+  resourcepacks: { label: 'Resource Packs', singular: 'resource pack', folderName: 'resourcepacks', fabric: false },
+  shaders: { label: 'Shaders', singular: 'shader', folderName: 'shaderpacks', fabric: false }
+});
+
+function normalizeContentTypeUi(value) {
+  return Object.prototype.hasOwnProperty.call(CONTENT_UI, value) ? value : 'mods';
+}
+
+function contentUi() {
+  return CONTENT_UI[normalizeContentTypeUi(activeContentType)];
+}
+
+function contentFolderForVersion(gameVersion) {
+  const details = gameVersionDetails(gameVersion);
+  if (activeContentType === 'resourcepacks') return details.resourcepacksDirectory || clientInfo?.resourcepacksDirectory || 'SpectorClient data/resourcepacks';
+  if (activeContentType === 'shaders') return details.shadersDirectory || clientInfo?.shadersDirectory || 'SpectorClient data/shaderpacks';
+  return details.modsDirectory || `SpectorClient data/instances/${gameVersion}/mods`;
+}
+
+function providerName() {
+  return contentProvider === 'curseforge' ? 'CurseForge' : 'Modrinth';
+}
+
+function providerLogo(provider) {
+  return provider === 'curseforge' ? 'https://www.curseforge.com/favicon.ico' : 'https://modrinth.com/favicon.ico';
+}
+
+function installedProjectKeys() {
+  return new Set(installedMods.filter((item) => item.projectId).map((item) => `${item.source || 'modrinth'}:${item.projectId}`));
+}
+
+function syncContentUiLabels() {
+  const meta = contentUi();
+  const provider = providerName();
+  if ($('contentTypeSelect')) $('contentTypeSelect').value = activeContentType;
+  if ($('installModsTab')) $('installModsTab').textContent = `Install ${meta.label}`;
+  if ($('installedContentTitle')) $('installedContentTitle').textContent = `Installed ${meta.label}`;
+  if ($('contentBrowseTitle')) $('contentBrowseTitle').textContent = `Browse ${provider}`;
+  if ($('openModsFolderBtn')) $('openModsFolderBtn').textContent = `Open ${meta.folderName} folder`;
+  if ($('contentVersionQuestion')) $('contentVersionQuestion').textContent = `Which SpectorClient version do you want to browse ${meta.label.toLowerCase()} for?`;
+  if ($('contentVersionHint')) $('contentVersionHint').textContent = activeContentType === 'mods'
+    ? 'Mods stay isolated per Minecraft version.'
+    : `${meta.label} are shared, but search results are filtered to the selected Minecraft version.`;
+  document.querySelectorAll('[data-content-provider]').forEach((button) => {
+    const active = button.dataset.contentProvider === contentProvider;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
 }
 
 function resetModsVersionSelection() {
@@ -266,7 +322,8 @@ function resetModsVersionSelection() {
   $('modVersionChooser')?.classList.remove('hidden');
   $('modManagerContent')?.classList.add('hidden');
   if ($('openModsFolderBtn')) $('openModsFolderBtn').disabled = true;
-  if ($('modsDescription')) $('modsDescription').textContent = 'Select a SpectorClient version first. Each version has its own mods folder and Modrinth library.';
+  if ($('modsDescription')) $('modsDescription').textContent = `Select a SpectorClient version to browse ${contentUi().label.toLowerCase()} from Modrinth or CurseForge.`;
+  syncContentUiLabels();
   if ($('installedTabCount')) $('installedTabCount').textContent = '0';
   if ($('modSearchInput')) $('modSearchInput').value = '';
 }
@@ -274,6 +331,7 @@ function resetModsVersionSelection() {
 async function selectModsVersion(gameVersion) {
   modsTargetVersion = normalizeGameVersion(gameVersion);
   const details = gameVersionDetails(modsTargetVersion);
+  const meta = contentUi();
   modBrowseLoaded = false;
   installedMods = [];
   modStatuses = {};
@@ -286,15 +344,17 @@ async function selectModsVersion(gameVersion) {
   $('modManagerContent')?.classList.remove('hidden');
   $('openModsFolderBtn').disabled = false;
   $('modSelectedVersionLabel').textContent = details.label || `SpectorClient ${modsTargetVersion}`;
-  $('modsDescription').innerHTML = `Managing <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Mods folder: <code>${escapeHtml(details.modsDirectory || '')}</code>`;
-  $('modSearchInput').placeholder = `Search Modrinth for Fabric ${modsTargetVersion} mods...`;
-  $('modBrowseSubtitle').textContent = `Only Fabric + Minecraft ${modsTargetVersion} results`;
-  $('modManagerStatus').textContent = `Loading ${details.label || modsTargetVersion} mods…`;
+  $('modsDescription').innerHTML = `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
+  $('modSearchInput').placeholder = `Search ${providerName()} for Minecraft ${modsTargetVersion} ${meta.label.toLowerCase()}...`;
+  $('modBrowseSubtitle').textContent = meta.fabric
+    ? `Fabric + Minecraft ${modsTargetVersion}`
+    : `Minecraft ${modsTargetVersion} compatible ${meta.label.toLowerCase()}`;
+  $('modManagerStatus').textContent = `Loading installed ${meta.label.toLowerCase()}…`;
+  syncContentUiLabels();
   activeModTab = 'install';
   await refreshInstalledMods();
   setModTab('install');
 }
-
 
 function socialHeadUrl(user, size = 64) {
   const id = String(user?.id || user?.uuid || '').trim();
@@ -588,15 +648,15 @@ function showView(name) {
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
-    // Default Mods to the same client version selected on the Home/Play screen.
-    // The existing Change version button still lets the user switch the Mods target independently.
+    // Default Content to the same client version selected on the Home/Play screen.
+    // Change version still lets the user switch the compatibility target independently.
     resetModsVersionSelection();
     void selectModsVersion(selectedGameVersion()).catch((error) => {
       resetModsVersionSelection();
       if ($('modsDescription')) {
-        $('modsDescription').textContent = `Could not load mods for SpectorClient ${selectedGameVersion()}: ${error.message}`;
+        $('modsDescription').textContent = `Could not load content for SpectorClient ${selectedGameVersion()}: ${error.message}`;
       }
-      showToast(`Could not load mods: ${error.message}`);
+      showToast(`Could not load content: ${error.message}`);
     });
   }
 }
@@ -927,22 +987,22 @@ function setModTab(tab) {
 }
 
 function installedProjectIds() {
-  return new Set(installedMods.filter((m) => m.projectId).map((m) => m.projectId));
+  return installedProjectKeys();
 }
 
 async function refreshModStatuses(projectIds) {
   const ids = [...new Set((projectIds || []).filter(Boolean))];
-  if (!ids.length) return;
+  if (!ids.length || !modsTargetVersion) return;
   try {
-    const latest = await window.launcher.getModStatuses(modsTargetVersion, ids);
+    const latest = await window.launcher.getContentStatuses(modsTargetVersion, activeContentType, contentProvider, ids);
     modStatuses = { ...modStatuses, ...(latest || {}) };
   } catch (error) {
-    console.warn('Could not check Modrinth update status:', error);
+    console.warn(`Could not check ${providerName()} content update status:`, error);
   }
 }
 
 function updateButtonForInstalledMod(mod) {
-  if (!mod.projectId) return '';
+  if (!mod.projectId || (mod.source || 'modrinth') !== contentProvider) return '';
   const status = modStatuses[mod.projectId];
   if (status && !status.error && status.installed && !status.updateAvailable) {
     return `<button class="update-mod-btn is-installed" disabled>Installed</button>`;
@@ -953,29 +1013,33 @@ function updateButtonForInstalledMod(mod) {
 
 function renderInstalledMods() {
   const host = $('installedMods');
-  $('installedCount').textContent = `${installedMods.length} mod${installedMods.length === 1 ? '' : 's'}`;
+  const meta = contentUi();
+  $('installedCount').textContent = `${installedMods.length} ${meta.singular}${installedMods.length === 1 ? '' : 's'}`;
   const tabCount = $('installedTabCount');
   if (tabCount) tabCount.textContent = String(installedMods.length);
   if (!installedMods.length) {
-    host.innerHTML = `<div class="empty-state"><div><b>No mods installed yet</b><span>Core client files will appear after “Check files” or your first launch.</span></div></div>`;
+    const extra = activeContentType === 'mods' ? ' Core client files will appear after your first launch.' : '';
+    host.innerHTML = `<div class="empty-state"><div><b>No ${escapeHtml(meta.label.toLowerCase())} installed yet</b><span>Install content from Modrinth or CurseForge.${extra}</span></div></div>`;
     return;
   }
 
-  host.innerHTML = installedMods.map((mod) => {
-    const icon = mod.iconUrl
-      ? `<img class="mod-icon" src="${escapeHtml(mod.iconUrl)}" alt="" />`
-      : `<div class="mod-icon">${escapeHtml((mod.title || mod.filename).slice(0, 1).toUpperCase())}</div>`;
-    const tags = `${mod.core ? '<span class="core-pill">CORE</span>' : ''}${mod.dependency ? '<span class="dep-pill">DEPENDENCY</span>' : ''}`;
-    const detail = [mod.versionNumber, formatBytes(mod.size), mod.filename].filter(Boolean).join(' • ');
-    let actions = '<span class="core-pill">REQUIRED</span>';
-    if (!mod.core) {
-      const update = updateButtonForInstalledMod(mod);
-      actions = `<div class="installed-mod-actions">${update}<button class="remove-mod-btn" data-filename="${escapeHtml(mod.filename)}">Remove</button></div>`;
+  host.innerHTML = installedMods.map((item) => {
+    const icon = item.iconUrl
+      ? `<img class="mod-icon" src="${escapeHtml(item.iconUrl)}" alt="" />`
+      : `<div class="mod-icon">${escapeHtml((item.title || item.filename).slice(0, 1).toUpperCase())}</div>`;
+    const source = item.source || '';
+    const sourceBadge = source ? `<span class="content-source-badge"><img src="${providerLogo(source)}" alt="" />${source === 'curseforge' ? 'CurseForge' : 'Modrinth'}</span>` : '';
+    const tags = `${item.core ? '<span class="core-pill">CORE</span>' : ''}${item.dependency ? '<span class="dep-pill">DEPENDENCY</span>' : ''}${sourceBadge}`;
+    const detail = [item.versionNumber, item.size ? formatBytes(item.size) : item.directory ? 'Folder' : '', item.filename].filter(Boolean).join(' • ');
+    let actions = item.core ? '<span class="core-pill">REQUIRED</span>' : '';
+    if (!item.core) {
+      const update = updateButtonForInstalledMod(item);
+      actions = `<div class="installed-mod-actions">${update}<button class="remove-mod-btn" data-filename="${escapeHtml(item.filename)}">Remove</button></div>`;
     }
     return `
       <div class="installed-mod">
         ${icon}
-        <div class="installed-mod-copy"><b>${escapeHtml(mod.title)}${tags}</b><small>${escapeHtml(detail)}</small></div>
+        <div class="installed-mod-copy"><b>${escapeHtml(item.title)}${tags}</b><small>${escapeHtml(detail)}</small></div>
         ${actions}
       </div>`;
   }).join('');
@@ -983,18 +1047,18 @@ function renderInstalledMods() {
   host.querySelectorAll('.update-mod-btn').forEach((button) => {
     button.addEventListener('click', async () => {
       const projectId = button.dataset.projectId;
-      const title = button.dataset.title || 'mod';
+      const title = button.dataset.title || contentUi().singular;
       button.disabled = true;
       button.textContent = 'Updating…';
-      $('modManagerStatus').textContent = `Updating ${title} and all required dependencies…`;
+      $('modManagerStatus').textContent = `Updating ${title} from ${providerName()}…`;
       try {
-        const result = await window.launcher.installMod(modsTargetVersion, projectId);
-        installedMods = result.mods || await window.launcher.listMods(modsTargetVersion);
-        await refreshModStatuses(installedMods.filter((mod) => mod.projectId).map((mod) => mod.projectId));
+        const result = await window.launcher.installContent(modsTargetVersion, activeContentType, contentProvider, projectId);
+        installedMods = result.items || await window.launcher.listContent(modsTargetVersion, activeContentType);
+        await refreshModStatuses(installedMods.filter((item) => item.projectId && (item.source || 'modrinth') === contentProvider).map((item) => item.projectId));
         renderInstalledMods();
         renderSearchResults();
         const label = result.action === 'verified' ? 'already up to date' : 'updated';
-        $('modManagerStatus').textContent = `${result.installed?.title || title} ${label}; required dependencies checked.`;
+        $('modManagerStatus').textContent = `${result.installed?.title || title} ${label}.`;
         showToast(`${result.installed?.title || title} ${label}.`);
       } catch (error) {
         $('modManagerStatus').textContent = `Update failed: ${error.message}`;
@@ -1008,10 +1072,10 @@ function renderInstalledMods() {
       if (!window.confirm(`Remove ${button.dataset.filename}?`)) return;
       button.disabled = true;
       try {
-        installedMods = await window.launcher.removeMod(modsTargetVersion, button.dataset.filename);
+        installedMods = await window.launcher.removeContent(modsTargetVersion, activeContentType, button.dataset.filename);
         renderInstalledMods();
         renderSearchResults();
-        $('modManagerStatus').textContent = 'Mod removed.';
+        $('modManagerStatus').textContent = `${contentUi().singular[0].toUpperCase()}${contentUi().singular.slice(1)} removed.`;
       } catch (error) {
         $('modManagerStatus').textContent = error.message;
         button.disabled = false;
@@ -1023,12 +1087,12 @@ function renderInstalledMods() {
 async function refreshInstalledMods() {
   if (!modsTargetVersion) return;
   try {
-    installedMods = await window.launcher.listMods(modsTargetVersion);
-    await refreshModStatuses(installedMods.filter((mod) => mod.projectId && !mod.core).map((mod) => mod.projectId));
+    installedMods = await window.launcher.listContent(modsTargetVersion, activeContentType);
+    await refreshModStatuses(installedMods.filter((item) => item.projectId && (item.source || 'modrinth') === contentProvider && !item.core).map((item) => item.projectId));
     renderInstalledMods();
     renderSearchResults();
   } catch (error) {
-    $('installedMods').innerHTML = `<div class="empty-state"><div><b>Could not read the mods folder</b><span>${escapeHtml(error.message)}</span></div></div>`;
+    $('installedMods').innerHTML = `<div class="empty-state"><div><b>Could not read the ${escapeHtml(contentUi().folderName)} folder</b><span>${escapeHtml(error.message)}</span></div></div>`;
   }
 }
 
@@ -1069,36 +1133,39 @@ function renderModPagination() {
 
 function renderSearchResults() {
   const host = $('modSearchResults');
+  const meta = contentUi();
   if (!lastSearchResults.length) {
     host.innerHTML = `<div class="empty-state compact-empty"><div><b>No results on this page</b><span>Try another search or page.</span></div></div>`;
     renderModPagination();
     return;
   }
 
-  const installed = installedProjectIds();
-  const hasFabricApi = installedMods.some((mod) => mod.filename.toLowerCase().startsWith('fabric-api-'));
+  const installed = installedProjectKeys();
+  const hasFabricApi = activeContentType === 'mods' && installedMods.some((item) => item.filename.toLowerCase().startsWith('fabric-api-'));
 
-  host.innerHTML = lastSearchResults.map((mod) => {
-    const isInstalled = installed.has(mod.projectId) || (mod.slug === 'fabric-api' && hasFabricApi);
-    const status = modStatuses[mod.projectId];
-    const updateAvailable = Boolean(isInstalled && status?.updateAvailable);
+  host.innerHTML = lastSearchResults.map((item) => {
+    const source = item.source || contentProvider;
+    const key = `${source}:${item.projectId}`;
+    const isInstalled = installed.has(key) || (activeContentType === 'mods' && item.slug === 'fabric-api' && hasFabricApi);
+    const status = modStatuses[item.projectId];
     const installedCurrent = Boolean(isInstalled && status?.installedVersionId && status?.latestVersionId && status.installedVersionId === status.latestVersionId);
     const actionLabel = installedCurrent ? 'Installed' : isInstalled ? 'Update' : 'Install';
     const actionClass = installedCurrent ? ' is-installed' : isInstalled ? ' is-update' : '';
-    const icon = mod.iconUrl
-      ? `<img class="mod-icon" src="${escapeHtml(mod.iconUrl)}" alt="" />`
-      : `<div class="mod-icon">${escapeHtml(mod.title.slice(0, 1).toUpperCase())}</div>`;
+    const icon = item.iconUrl
+      ? `<img class="mod-icon" src="${escapeHtml(item.iconUrl)}" alt="" />`
+      : `<div class="mod-icon">${escapeHtml(item.title.slice(0, 1).toUpperCase())}</div>`;
+    const sourceBadge = `<span class="content-source-badge"><img src="${providerLogo(source)}" alt="" />${source === 'curseforge' ? 'CurseForge' : 'Modrinth'}</span>`;
     return `
       <article class="mod-card">
         ${icon}
         <div class="mod-card-main">
-          <div class="mod-card-title-line"><h4>${escapeHtml(mod.title)}</h4><span class="mod-card-author">by ${escapeHtml(mod.author)}</span></div>
-          <p>${escapeHtml(mod.description)}</p>
+          <div class="mod-card-title-line"><h4>${escapeHtml(item.title)}</h4>${sourceBadge}<span class="mod-card-author">by ${escapeHtml(item.author)}</span></div>
+          <p>${escapeHtml(item.description)}</p>
           <div class="mod-card-foot">
-            <span class="downloads">↓ ${formatDownloads(mod.downloads)} downloads</span>
+            <span class="downloads">↓ ${formatDownloads(item.downloads)} downloads</span>
             <div class="mod-actions">
-              <button class="mod-page-btn" data-slug="${escapeHtml(mod.slug)}">Page</button>
-              <button class="install-mod-btn${actionClass}" data-project-id="${escapeHtml(mod.projectId)}" data-installed="${isInstalled ? 'true' : 'false'}" ${installedCurrent ? 'disabled' : ''}>${actionLabel}</button>
+              <button class="mod-page-btn" data-page-url="${escapeHtml(item.pageUrl || '')}">Page</button>
+              <button class="install-mod-btn${actionClass}" data-project-id="${escapeHtml(item.projectId)}" data-installed="${isInstalled ? 'true' : 'false'}" ${installedCurrent ? 'disabled' : ''}>${actionLabel}</button>
             </div>
           </div>
         </div>
@@ -1107,28 +1174,28 @@ function renderSearchResults() {
 
   host.querySelectorAll('.mod-page-btn').forEach((button) => {
     button.addEventListener('click', () => {
-      const slug = encodeURIComponent(button.dataset.slug || '');
-      if (slug) window.launcher.openExternal(`https://modrinth.com/mod/${slug}`);
+      const url = button.dataset.pageUrl || '';
+      if (/^https:\/\//i.test(url)) window.launcher.openExternal(url);
     });
   });
 
   host.querySelectorAll('.install-mod-btn').forEach((button) => {
     button.addEventListener('click', async () => {
       const projectId = button.dataset.projectId;
-      const mod = lastSearchResults.find((item) => item.projectId === projectId);
+      const item = lastSearchResults.find((entry) => entry.projectId === projectId);
       const wasInstalled = button.dataset.installed === 'true';
       button.disabled = true;
       button.textContent = wasInstalled ? 'Updating…' : 'Installing…';
-      $('modManagerStatus').textContent = `${wasInstalled ? 'Updating' : 'Installing'} ${mod?.title || 'mod'} and all required dependencies…`;
+      $('modManagerStatus').textContent = `${wasInstalled ? 'Updating' : 'Installing'} ${item?.title || meta.singular} from ${providerName()}…`;
       try {
-        const result = await window.launcher.installMod(modsTargetVersion, projectId);
-        installedMods = result.mods || await window.launcher.listMods(modsTargetVersion);
-        await refreshModStatuses(installedMods.filter((item) => item.projectId).map((item) => item.projectId));
+        const result = await window.launcher.installContent(modsTargetVersion, activeContentType, contentProvider, projectId);
+        installedMods = result.items || await window.launcher.listContent(modsTargetVersion, activeContentType);
+        await refreshModStatuses(installedMods.filter((entry) => entry.projectId && (entry.source || 'modrinth') === contentProvider).map((entry) => entry.projectId));
         renderInstalledMods();
         renderSearchResults();
         const verb = result.action === 'updated' ? 'updated' : result.action === 'verified' ? 'already up to date' : 'installed';
-        $('modManagerStatus').textContent = `${result.installed?.title || mod?.title || 'Mod'} ${verb}; required dependencies checked.`;
-        showToast(`${result.installed?.title || mod?.title || 'Mod'} ${verb}.`);
+        $('modManagerStatus').textContent = `${result.installed?.title || item?.title || meta.label} ${verb} from ${providerName()}.`;
+        showToast(`${result.installed?.title || item?.title || meta.label} ${verb}.`);
       } catch (error) {
         $('modManagerStatus').textContent = `${wasInstalled ? 'Update' : 'Install'} failed: ${error.message}`;
         renderSearchResults();
@@ -1141,6 +1208,7 @@ function renderSearchResults() {
 
 async function searchMods(query = $('modSearchInput').value, page = 1, resetOnQueryChange = true) {
   if (!modsTargetVersion) return;
+  const meta = contentUi();
   const q = String(query || '').trim();
   const queryChanged = q !== modSearchQuery;
   if (resetOnQueryChange && queryChanged) page = 1;
@@ -1149,36 +1217,36 @@ async function searchMods(query = $('modSearchInput').value, page = 1, resetOnQu
 
   $('modSearchBtn').disabled = true;
   $('modManagerStatus').textContent = q
-    ? `Searching Modrinth for “${q}” — page ${modSearchPage}…`
-    : `Loading popular Fabric ${modsTargetVersion} mods — page ${modSearchPage}…`;
-  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading Modrinth…</b><span>Filtering for Fabric + Minecraft ${escapeHtml(modsTargetVersion)}.</span></div></div>`;
+    ? `Searching ${providerName()} for “${q}” — page ${modSearchPage}…`
+    : `Loading popular ${meta.label.toLowerCase()} from ${providerName()} for ${modsTargetVersion} — page ${modSearchPage}…`;
+  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading ${providerName()}…</b><span>Filtering for Minecraft ${escapeHtml(modsTargetVersion)}${meta.fabric ? ' + Fabric' : ''}.</span></div></div>`;
   $('modPagination').classList.add('hidden');
   try {
-    const result = await window.launcher.searchMods(modsTargetVersion, q, modSearchPage);
+    const result = await window.launcher.searchContent(modsTargetVersion, activeContentType, contentProvider, q, modSearchPage);
     lastSearchResults = Array.isArray(result) ? result : (result?.items || []);
     modSearchTotal = Array.isArray(result) ? lastSearchResults.length : Number(result?.total || 0);
     modSearchTotalPages = Array.isArray(result) ? 1 : Math.max(1, Number(result?.totalPages || 1));
     modSearchPageSize = Array.isArray(result) ? Math.max(1, lastSearchResults.length) : Math.max(1, Number(result?.pageSize || 24));
     modSearchPage = Array.isArray(result) ? 1 : Math.max(1, Number(result?.page || modSearchPage));
-    await refreshModStatuses(lastSearchResults.map((mod) => mod.projectId));
+    modStatuses = {};
+    await refreshModStatuses(lastSearchResults.map((item) => item.projectId));
     renderSearchResults();
     const startIndex = modSearchTotal ? ((modSearchPage - 1) * modSearchPageSize) + 1 : 0;
     const endIndex = Math.min(modSearchTotal, startIndex + lastSearchResults.length - 1);
     $('modManagerStatus').textContent = modSearchTotal
-      ? `Showing ${startIndex}–${endIndex} of ${modSearchTotal} compatible mods.`
-      : 'No compatible mods found.';
+      ? `Showing ${startIndex}–${endIndex} of ${modSearchTotal} compatible ${meta.label.toLowerCase()} from ${providerName()}.`
+      : `No compatible ${meta.label.toLowerCase()} found.`;
   } catch (error) {
     lastSearchResults = [];
     modSearchTotal = 0;
     modSearchTotalPages = 1;
-    $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Modrinth search failed</b><span>${escapeHtml(error.message)}</span></div></div>`;
+    $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>${providerName()} search failed</b><span>${escapeHtml(error.message)}</span></div></div>`;
     $('modPagination').classList.add('hidden');
     $('modManagerStatus').textContent = error.message;
   } finally {
     $('modSearchBtn').disabled = false;
   }
 }
-
 
 // Global subtle UI feedback. Hover is throttled so moving across a dense mod list
 // never becomes noisy. More important actions get distinct cues.
@@ -1294,11 +1362,41 @@ $('changeModVersionBtn').addEventListener('click', resetModsVersionSelection);
 document.querySelectorAll('[data-mod-tab]').forEach((button) => {
   button.addEventListener('click', () => setModTab(button.dataset.modTab));
 });
-$('openModsFolderBtn').addEventListener('click', () => modsTargetVersion && window.launcher.openModsFolder(modsTargetVersion));
+$('openModsFolderBtn').addEventListener('click', () => modsTargetVersion && window.launcher.openContentFolder(modsTargetVersion, activeContentType));
 $('refreshModsBtn').addEventListener('click', refreshInstalledMods);
 $('modSearchBtn').addEventListener('click', () => searchMods($('modSearchInput').value, 1));
 $('modSearchInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') searchMods($('modSearchInput').value, 1);
+});
+
+$('contentTypeSelect').addEventListener('change', async () => {
+  activeContentType = normalizeContentTypeUi($('contentTypeSelect').value);
+  modBrowseLoaded = false;
+  modStatuses = {};
+  lastSearchResults = [];
+  modSearchQuery = '';
+  modSearchPage = 1;
+  syncContentUiLabels();
+  if (modsTargetVersion) await selectModsVersion(modsTargetVersion);
+});
+
+document.querySelectorAll('[data-content-provider]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const next = button.dataset.contentProvider === 'curseforge' ? 'curseforge' : 'modrinth';
+    if (next === contentProvider) return;
+    contentProvider = next;
+    modBrowseLoaded = false;
+    modStatuses = {};
+    lastSearchResults = [];
+    modSearchQuery = '';
+    modSearchPage = 1;
+    syncContentUiLabels();
+    if (modsTargetVersion) {
+      $('modSearchInput').placeholder = `Search ${providerName()} for Minecraft ${modsTargetVersion} ${contentUi().label.toLowerCase()}...`;
+      await refreshInstalledMods();
+      setModTab('install');
+    }
+  });
 });
 
 // Settings / misc
@@ -1532,6 +1630,8 @@ window.launcher.onInstallState((data) => {
 
 window.launcher.onModInstallState((data) => {
   if (!modsTargetVersion || (data.gameVersion && data.gameVersion !== modsTargetVersion)) return;
+  if (data.contentType && data.contentType !== activeContentType) return;
+  if (data.provider && data.provider !== contentProvider) return;
   $('modManagerStatus').textContent = data.text || data.state || 'Installing mod…';
 });
 
