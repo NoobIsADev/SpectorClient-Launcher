@@ -1,7 +1,7 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.35",
-  "description": "SpectorClient Electron launcher for Windows and Linux with selectable Minecraft clients, Content management via Modrinth and CurseForge, shared client settings, managed Java runtimes, Satellite friends/messaging, native notifications, and automatic direct-to-latest updates",
+  "version": "1.6.36",
+  "description": "SpectorClient Electron launcher for Windows, Linux, and macOS with selectable Minecraft clients, Content management via Modrinth and CurseForge, shared client settings, managed Java runtimes, Satellite friends/messaging, native notifications, and automatic updates where supported.",
   "main": "src/main.js",
   "author": "SpectorClient",
   "license": "MIT",
@@ -22,7 +22,11 @@
     "predist:linux": "npm run fetch-brand",
     "release:linux": "npm run prepare-secrets && npm run fetch-brand && electron-builder --linux AppImage --x64 --publish never",
     "build:release:linux": "npm run release:linux",
-    "prepare-secrets": "node scripts/prepare-secrets.js"
+    "prepare-secrets": "node scripts/prepare-secrets.js",
+    "dist:mac": "electron-builder --mac dmg zip --universal",
+    "predist:mac": "npm run fetch-brand",
+    "release:mac": "npm run prepare-secrets && npm run fetch-brand && electron-builder --mac dmg zip --universal --publish never",
+    "build:release:mac": "npm run release:mac"
   },
   "dependencies": {
     "minecraft-launcher-core": "3.18.2",
@@ -95,6 +99,34 @@
     },
     "toolsets": {
       "appimage": "1.0.3"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "artifactName": "SpectorClient-${version}-${arch}.${ext}",
+      "icon": "build/icon.png",
+      "category": "public.app-category.games",
+      "extendInfo": {
+        "NSHighResolutionCapable": true,
+        "LSApplicationCategoryType": "public.app-category.games"
+      },
+      "minimumSystemVersion": "13.0"
+    },
+    "dmg": {
+      "artifactName": "SpectorClient-${version}-${arch}.${ext}",
+      "title": "SpectorClient ${version}"
     }
   }
 }

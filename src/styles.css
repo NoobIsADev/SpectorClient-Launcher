@@ -2645,7 +2645,7 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
 }
 
 /* ---------------------------------------------------------
-   SpectorClient v1.6.35 - cleaner Content provider header
+   SpectorClient v1.6.36 - cleaner Content provider header
    --------------------------------------------------------- */
 /* Search/install progress and API failures are already shown inside the
    results area/toasts. Keep the duplicate status line out of the Content UI. */

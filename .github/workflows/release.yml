@@ -1,4 +1,4 @@
-name: Release SpectorClient for Windows + Linux
+name: Release SpectorClient for Windows + Linux + macOS
 
 on:
   push:
@@ -161,9 +161,123 @@ jobs:
             dist/SpectorClient-*-x86_64.AppImage
             dist/latest-linux.yml
 
+  build-macos:
+    name: Build macOS Universal DMG
+    runs-on: macos-latest
+    env:
+      # Optional. If these secrets are ever added, the same workflow signs the
+      # macOS build automatically. With no secrets it still publishes an unsigned
+      # Universal DMG/ZIP, so Windows publishing never needs extra user input.
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "Tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1; }
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax check launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer.js
+          node --check src/logs.js
+          node --check scripts/fetch-brand.js
+          node --check scripts/prepare-secrets.js
+
+      - name: Build signed macOS universal DMG + updater ZIP
+        if: env.MAC_CSC_LINK != ''
+        env:
+          CSC_LINK: ${{ env.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ env.MAC_CSC_KEY_PASSWORD }}
+        run: npm run release:mac
+
+      - name: Build unsigned macOS universal DMG + updater ZIP
+        if: env.MAC_CSC_LINK == ''
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run release:mac
+
+      - name: Verify macOS release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          dmg="dist/SpectorClient-${version}-universal.dmg"
+          zip="dist/SpectorClient-${version}-universal.zip"
+          metadata="dist/latest-mac.yml"
+          test -s "$dmg" || { echo "Missing/empty $dmg"; exit 1; }
+          test -s "$zip" || { echo "Missing/empty $zip"; exit 1; }
+          test -s "$metadata" || { echo "Missing/empty $metadata"; exit 1; }
+
+          VERSION="$version" ZIP_PATH="$zip" METADATA_PATH="$metadata" node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const version = process.env.VERSION;
+          const zip = process.env.ZIP_PATH;
+          const metadata = fs.readFileSync(process.env.METADATA_PATH, 'utf8');
+          if (!new RegExp(`^version:\\s*${version.replace(/\\./g, '\\\\.')}\\s*$`, 'm').test(metadata)) {
+            throw new Error(`latest-mac.yml does not advertise ${version}`);
+          }
+          const expectedName = `SpectorClient-${version}-universal.zip`;
+          if (!metadata.includes(expectedName)) throw new Error('latest-mac.yml does not point to the universal updater ZIP');
+
+          const lines = metadata.split(/\r?\n/);
+          let expectedSha = null;
+          for (let i = 0; i < lines.length; i += 1) {
+            if (!lines[i].includes(expectedName)) continue;
+            for (let j = i + 1; j < Math.min(lines.length, i + 6); j += 1) {
+              const match = lines[j].match(/^\s*sha512:\s*(.+?)\s*$/);
+              if (match) {
+                expectedSha = match[1].trim().replace(/^['"]|['"]$/g, '');
+                break;
+              }
+            }
+            if (expectedSha) break;
+          }
+          if (!expectedSha) {
+            const pathMatch = metadata.match(/^path:\s*(.+?)\s*$/m);
+            const shaMatch = metadata.match(/^sha512:\s*(.+?)\s*$/m);
+            if (pathMatch?.[1]?.trim().replace(/^['"]|['"]$/g, '') === expectedName && shaMatch) {
+              expectedSha = shaMatch[1].trim().replace(/^['"]|['"]$/g, '');
+            }
+          }
+          if (!expectedSha) throw new Error('Could not locate the macOS ZIP sha512 in latest-mac.yml');
+          const actualSha = crypto.createHash('sha512').update(fs.readFileSync(zip)).digest('base64');
+          if (expectedSha !== actualSha) throw new Error('macOS updater ZIP sha512 does not match latest-mac.yml');
+          NODE
+
+      - name: Upload macOS release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: spectorclient-macos-release
+          if-no-files-found: error
+          retention-days: 2
+          path: |
+            dist/SpectorClient-*-universal.dmg
+            dist/SpectorClient-*-universal.dmg.blockmap
+            dist/SpectorClient-*-universal.zip
+            dist/latest-mac.yml
+
   publish-release:
-    name: Publish verified Windows + Linux release
-    needs: [build-windows, build-linux]
+    name: Publish verified Windows + Linux + macOS release
+    needs: [build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -189,6 +303,9 @@ jobs:
             "dist/latest.yml"
             "dist/SpectorClient-${version}-x86_64.AppImage"
             "dist/latest-linux.yml"
+            "dist/SpectorClient-${version}-universal.dmg"
+            "dist/SpectorClient-${version}-universal.zip"
+            "dist/latest-mac.yml"
           )
           for file in "${expected[@]}"; do
             test -s "$file" || { echo "Release file missing or empty: $file"; exit 1; }
@@ -201,12 +318,10 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
 
-          # Remove a release object for this tag if a previous attempt left one.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release delete "$tag" --yes
           fi
 
-          # Clean the known failed drafts from the earlier updater pipeline.
           releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
           for stale in v1.6.5 v1.6.6 v1.6.7 v1.6.8; do
             ids="$(printf '%s' "$releases" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const r of JSON.parse(s)){if(r.draft&&r.tag_name===process.argv[1]) console.log(r.id)}})" "$stale")"
@@ -222,18 +337,25 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           gh release create "${GITHUB_REF_NAME}" --draft --title "SpectorClient ${version}" --target "${GITHUB_SHA}" --generate-notes
 
-      - name: Upload all Windows and Linux updater files
+      - name: Upload all Windows, Linux and macOS release files
         shell: bash
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          gh release upload "${GITHUB_REF_NAME}" \
-            "dist/SpectorClient-${version}-x64.exe" \
-            "dist/SpectorClient-${version}-x64.exe.blockmap" \
-            "dist/latest.yml" \
-            "dist/SpectorClient-${version}-x86_64.AppImage" \
-            "dist/latest-linux.yml" \
-            --clobber
+          assets=(
+            "dist/SpectorClient-${version}-x64.exe"
+            "dist/SpectorClient-${version}-x64.exe.blockmap"
+            "dist/latest.yml"
+            "dist/SpectorClient-${version}-x86_64.AppImage"
+            "dist/latest-linux.yml"
+            "dist/SpectorClient-${version}-universal.dmg"
+            "dist/SpectorClient-${version}-universal.zip"
+            "dist/latest-mac.yml"
+          )
+          if [ -s "dist/SpectorClient-${version}-universal.dmg.blockmap" ]; then
+            assets+=("dist/SpectorClient-${version}-universal.dmg.blockmap")
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
 
       - name: Verify draft release assets
         shell: bash
@@ -254,7 +376,10 @@ jobs:
             `SpectorClient-${v}-x64.exe.blockmap`,
             'latest.yml',
             `SpectorClient-${v}-x86_64.AppImage`,
-            'latest-linux.yml'
+            'latest-linux.yml',
+            `SpectorClient-${v}-universal.dmg`,
+            `SpectorClient-${v}-universal.zip`,
+            'latest-mac.yml'
           ];
           const assets = new Map((release.assets || []).map(a => [a.name, a]));
           for (const name of expected) {
@@ -270,7 +395,7 @@ jobs:
           set -euo pipefail
           gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
 
-      - name: Verify public Windows + Linux auto-update endpoints
+      - name: Verify public Windows + Linux + macOS endpoints
         shell: bash
         run: |
           set -euo pipefail
@@ -284,16 +409,24 @@ jobs:
             "$base/latest.yml" -o "$verify_dir/latest.yml"
           curl -fL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' -A 'SpectorClient-Release-Verification' \
             "$base/latest-linux.yml" -o "$verify_dir/latest-linux.yml"
+          curl -fL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' -A 'SpectorClient-Release-Verification' \
+            "$base/latest-mac.yml" -o "$verify_dir/latest-mac.yml"
 
           grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest.yml"
           grep -Fq "SpectorClient-${version}-x64.exe" "$verify_dir/latest.yml"
           grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest-linux.yml"
           grep -Fq "SpectorClient-${version}-x86_64.AppImage" "$verify_dir/latest-linux.yml"
+          grep -Eq "^version:[[:space:]]*${version}[[:space:]]*$" "$verify_dir/latest-mac.yml"
+          grep -Fq "SpectorClient-${version}-universal.zip" "$verify_dir/latest-mac.yml"
 
           curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
             "$base/SpectorClient-${version}-x64.exe" >/dev/null
           curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
             "$base/SpectorClient-${version}-x86_64.AppImage" >/dev/null
+          curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
+            "$base/SpectorClient-${version}-universal.dmg" >/dev/null
+          curl -fLsSI --retry 5 --retry-all-errors -A 'SpectorClient-Release-Verification' \
+            "$base/SpectorClient-${version}-universal.zip" >/dev/null
 
           latest_ok=0
           last_seen=''
@@ -309,4 +442,4 @@ jobs:
           done
           test "$latest_ok" = 1 || { echo "Latest release pointer did not move to $tag (last seen $last_seen)"; exit 1; }
 
-          echo "Windows and Linux updater endpoints verified for SpectorClient ${version}."
+          echo "Windows, Linux and macOS release endpoints verified for SpectorClient ${version}."

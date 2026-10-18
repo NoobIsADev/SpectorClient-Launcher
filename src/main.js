@@ -5,7 +5,7 @@ const fsp = require('fs/promises');
 const crypto = require('crypto');
 const http = require('http');
 const https = require('https');
-const { execFile } = require('child_process');
+const { execFile, spawnSync } = require('child_process');
 const { Authflow } = require('prismarine-auth');
 const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
@@ -494,11 +494,12 @@ function temurinArch() {
 function temurinOs() {
   if (process.platform === 'win32') return 'windows';
   if (process.platform === 'linux') return 'linux';
+  if (process.platform === 'darwin') return 'mac';
   throw new Error(`Automatic Java installation is not supported on ${process.platform}.`);
 }
 
 function temurinPlatformLabel() {
-  return process.platform === 'win32' ? 'Windows' : process.platform === 'linux' ? 'Linux' : process.platform;
+  return process.platform === 'win32' ? 'Windows' : process.platform === 'linux' ? 'Linux' : process.platform === 'darwin' ? 'macOS' : process.platform;
 }
 
 function javaRuntimeDir(major) {
@@ -714,8 +715,8 @@ async function findJavaHome(root, depth = 4) {
 }
 
 async function extractJavaArchive(downloadPath, stagingDir) {
-  if (process.platform === 'linux') {
-    // Adoptium publishes Linux runtimes as .tar.gz archives. GNU tar preserves
+  if (process.platform === 'linux' || process.platform === 'darwin') {
+    // Adoptium publishes Linux and macOS runtimes as .tar.gz archives. tar preserves
     // the executable bit on bin/java, which is required for the managed runtime.
     await execFilePromise('tar', ['-xzf', downloadPath, '-C', stagingDir], {
       timeout: 180000,
@@ -752,7 +753,7 @@ async function extractJavaArchive(downloadPath, stagingDir) {
 async function installManagedJava(major) {
   major = Number(major);
   if (![21, 25].includes(major)) throw new Error(`Unsupported managed Java version: ${major}`);
-  if (!['win32', 'linux'].includes(process.platform)) {
+  if (!['win32', 'linux', 'darwin'].includes(process.platform)) {
     throw new Error(`Automatic Java ${major} installation is not supported on ${process.platform}. Select Java ${major} manually in Settings.`);
   }
 
@@ -830,7 +831,7 @@ async function installManagedJava(major) {
         if (!extractedHome) throw new Error(`Java ${major} extracted, but its Java executable could not be found.`);
 
         const extractedJava = path.join(extractedHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
-        if (process.platform === 'linux') await fsp.chmod(extractedJava, 0o755).catch(() => {});
+        if (process.platform !== 'win32') await fsp.chmod(extractedJava, 0o755).catch(() => {});
         const inspection = await inspectJava(extractedJava, major);
         if (!inspection.ok) {
           throw new Error(`The downloaded Java ${major} runtime failed its JVM test: ${inspection.reason}`);
@@ -848,7 +849,7 @@ async function installManagedJava(major) {
           }
 
           const finalJava = managedJavaPath(major);
-          if (process.platform === 'linux') await fsp.chmod(finalJava, 0o755).catch(() => {});
+          if (process.platform !== 'win32') await fsp.chmod(finalJava, 0o755).catch(() => {});
           const finalInspection = await inspectJava(finalJava, major);
           if (!finalInspection.ok) {
             throw new Error(`Installed Java ${major} failed its final JVM test: ${finalInspection.reason}`);
@@ -1483,7 +1484,7 @@ async function installDownloadedUpdateWhenSafe(reason = 'update downloaded') {
 function normalizeUpdaterError(error) {
   const raw = error?.message || String(error || 'Unknown updater error');
   const firstLine = raw.split(/\r?\n/)[0].trim();
-  const missingLatestMetadata = /latest(?:-linux)?\.yml/i.test(raw) && (/(?:404|not found)/i.test(raw) || /cannot find latest(?:-linux)?\.yml/i.test(raw));
+  const missingLatestMetadata = /latest(?:-(?:linux|mac))?\.yml/i.test(raw) && (/(?:404|not found)/i.test(raw) || /cannot find latest(?:-(?:linux|mac))?\.yml/i.test(raw));
   const rateLimited = /(?:rate limit|403)/i.test(raw) && /github/i.test(raw);
   const networkIssue = /(?:ENOTFOUND|ECONNRESET|ETIMEDOUT|network|socket hang up)/i.test(raw);
 
@@ -1553,9 +1554,40 @@ function verifyPackagedUpdateConfig() {
   }
 }
 
+function macHasTrustedUpdateSignature() {
+  if (process.platform !== 'darwin') return true;
+  try {
+    // Squirrel.Mac refuses unsigned/ad-hoc applications. Verify the enclosing
+    // .app bundle before enabling update downloads so an unsigned community
+    // build never downloads an update it cannot safely install.
+    const appBundle = path.dirname(path.dirname(path.dirname(process.execPath)));
+    const verify = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appBundle], {
+      encoding: 'utf8',
+      timeout: 15000
+    });
+    if (verify.status !== 0) return false;
+
+    const detail = spawnSync('/usr/bin/codesign', ['-dv', '--verbose=4', appBundle], {
+      encoding: 'utf8',
+      timeout: 15000
+    });
+    const text = `${detail.stdout || ''}\n${detail.stderr || ''}`;
+    if (detail.status !== 0 || /Signature=adhoc/i.test(text)) return false;
+    const team = text.match(/TeamIdentifier=([^\r\n]+)/i)?.[1]?.trim();
+    return Boolean(team && team.toLowerCase() !== 'not set');
+  } catch {
+    return false;
+  }
+}
+
 function setupAutoUpdater() {
   if (updaterInitialized || !app.isPackaged) {
-    if (!app.isPackaged) log(`[Updater] Development build ${app.getVersion()} detected; automatic app replacement is disabled. Install the Windows NSIS build or run the Linux AppImage to test auto-updates.`, 'updater');
+    if (!app.isPackaged) log(`[Updater] Development build ${app.getVersion()} detected; automatic app replacement is disabled. Install a packaged Windows, Linux, or macOS build to test auto-updates.`, 'updater');
+    return;
+  }
+
+  if (process.platform === 'darwin' && !macHasTrustedUpdateSignature()) {
+    log('[Updater] macOS auto-update is disabled for this unsigned build. Apple requires a consistent code signature for Squirrel.Mac updates; the DMG remains fully usable after macOS approval.', 'updater');
     return;
   }
 
@@ -1594,7 +1626,7 @@ function setupAutoUpdater() {
 
   autoUpdater.autoDownload = true;
   // Reliability over bandwidth: always download the complete platform package
-  // (NSIS on Windows, AppImage on Linux) instead of relying on differential patches.
+  // (NSIS on Windows, AppImage on Linux, ZIP payload on macOS) instead of relying on differential patches.
   autoUpdater.disableDifferentialDownload = true;
   autoUpdater.allowDowngrade = false;
   // We intentionally control installation ourselves. This prevents an update
@@ -3664,6 +3696,9 @@ app.whenReady().then(async () => {
   if (process.platform === 'win32') {
     app.setAppUserModelId(WINDOWS_APP_ID);
     if (typeof app.setToastActivatorCLSID === 'function') app.setToastActivatorCLSID(WINDOWS_TOAST_CLSID);
+  }
+  if (process.platform === 'darwin' && app.dock && fs.existsSync(BRAND_IMAGE_PATH)) {
+    try { app.dock.setIcon(nativeImage.createFromPath(BRAND_IMAGE_PATH)); } catch {}
   }
   configureNotificationPermissions();
   await ensureDirs();

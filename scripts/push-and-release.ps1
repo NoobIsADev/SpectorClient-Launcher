@@ -129,7 +129,10 @@ try {
             "SpectorClient-$Version-x64.exe.blockmap",
             'latest.yml',
             "SpectorClient-$Version-x86_64.AppImage",
-            'latest-linux.yml'
+            'latest-linux.yml',
+            "SpectorClient-$Version-universal.dmg",
+            "SpectorClient-$Version-universal.zip",
+            'latest-mac.yml'
         )
         $ActualAssets = @($Release.assets | ForEach-Object { $_.name })
         foreach ($Asset in $ExpectedAssets) {
@@ -143,7 +146,7 @@ try {
 
         Write-Host '[8/8] Done.' -ForegroundColor Green
         Write-Host ''
-        Write-Host "SpectorClient $Version is published with Windows + Linux updater files." -ForegroundColor Green
+        Write-Host "SpectorClient $Version is published with Windows + Linux + macOS release files." -ForegroundColor Green
         Write-Host "Release: $($Release.html_url)" -ForegroundColor Green
         Write-Host 'Actions: https://github.com/NoobIsADev/SpectorClient-Launcher/actions' -ForegroundColor Green
     }
