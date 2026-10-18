@@ -251,8 +251,14 @@ function renderSelectedVersionUI() {
   const gameVersion = selectedGameVersion();
   if ($('selectedVersionLabel')) $('selectedVersionLabel').textContent = gameVersion;
   if ($('settingsSelectedVersion')) $('settingsSelectedVersion').textContent = gameVersion;
-  document.querySelectorAll('[data-game-version]').forEach((button) => {
-    button.classList.toggle('selected', button.dataset.gameVersion === gameVersion);
+  document.querySelectorAll('[data-game-version]').forEach((card) => {
+    card.classList.toggle('selected', card.dataset.gameVersion === gameVersion);
+  });
+  document.querySelectorAll('[data-version-use]').forEach((button) => {
+    const active = normalizeGameVersion(button.dataset.versionUse) === gameVersion;
+    button.disabled = active;
+    button.textContent = active ? 'Using' : 'Use';
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   updatePlayState();
 }
@@ -293,20 +299,61 @@ function installedProjectKeys() {
 function syncContentUiLabels() {
   const meta = contentUi();
   const provider = providerName();
-  if ($('contentTypeSelect')) $('contentTypeSelect').value = activeContentType;
+  const globalContent = activeContentType !== 'mods';
+  if ($('contentTypeLabel')) $('contentTypeLabel').textContent = meta.label;
+  document.querySelectorAll('[data-content-type-option]').forEach((button) => {
+    const active = button.dataset.contentTypeOption === activeContentType;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   if ($('installModsTab')) $('installModsTab').textContent = `Install ${meta.label}`;
   if ($('installedContentTitle')) $('installedContentTitle').textContent = `Installed ${meta.label}`;
   if ($('contentBrowseTitle')) $('contentBrowseTitle').textContent = `Browse ${provider}`;
   if ($('openModsFolderBtn')) $('openModsFolderBtn').textContent = `Open ${meta.folderName} folder`;
-  if ($('contentVersionQuestion')) $('contentVersionQuestion').textContent = `Which SpectorClient version do you want to browse ${meta.label.toLowerCase()} for?`;
-  if ($('contentVersionHint')) $('contentVersionHint').textContent = activeContentType === 'mods'
-    ? 'Mods stay isolated per Minecraft version.'
-    : `${meta.label} are shared, but search results are filtered to the selected Minecraft version.`;
+  if ($('contentVersionQuestion')) $('contentVersionQuestion').textContent = globalContent
+    ? `Which Minecraft version should ${meta.label.toLowerCase()} compatibility target?`
+    : `Which SpectorClient version do you want to browse ${meta.label.toLowerCase()} for?`;
+  if ($('contentVersionHint')) $('contentVersionHint').textContent = globalContent
+    ? `${meta.label} install into one global shared folder. This choice only filters compatible downloads.`
+    : 'Mods stay isolated per Minecraft version.';
+
+  const chooserText = (version) => globalContent
+    ? `Compatibility filter • Minecraft ${version} • shared ${meta.folderName}`
+    : `Fabric • ${gameVersionDetails(version).modsDirectory || `SpectorClient data/instances/${version}/mods`}`;
+  if ($('modChooserPath26')) $('modChooserPath26').textContent = chooserText('26.2');
+  if ($('modChooserPath263')) $('modChooserPath263').textContent = chooserText('26.3');
+  if ($('modChooserPath12111')) $('modChooserPath12111').textContent = chooserText('1.21.11');
+
   document.querySelectorAll('[data-content-provider]').forEach((button) => {
     const active = button.dataset.contentProvider === contentProvider;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
   });
+}
+
+function setContentTypeMenuOpen(open) {
+  const menu = $('contentTypeMenu');
+  const button = $('contentTypeButton');
+  if (!menu || !button) return;
+  menu.classList.toggle('hidden', !open);
+  button.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+async function setActiveContentType(nextType) {
+  const next = normalizeContentTypeUi(nextType);
+  if (next === activeContentType) {
+    setContentTypeMenuOpen(false);
+    return;
+  }
+  activeContentType = next;
+  modBrowseLoaded = false;
+  modStatuses = {};
+  lastSearchResults = [];
+  modSearchQuery = '';
+  modSearchPage = 1;
+  syncContentUiLabels();
+  setContentTypeMenuOpen(false);
+  if (modsTargetVersion) await selectModsVersion(modsTargetVersion);
 }
 
 function resetModsVersionSelection() {
@@ -332,6 +379,7 @@ async function selectModsVersion(gameVersion) {
   modsTargetVersion = normalizeGameVersion(gameVersion);
   const details = gameVersionDetails(modsTargetVersion);
   const meta = contentUi();
+  const globalContent = activeContentType !== 'mods';
   modBrowseLoaded = false;
   installedMods = [];
   modStatuses = {};
@@ -343,12 +391,17 @@ async function selectModsVersion(gameVersion) {
   $('modVersionChooser')?.classList.add('hidden');
   $('modManagerContent')?.classList.remove('hidden');
   $('openModsFolderBtn').disabled = false;
-  $('modSelectedVersionLabel').textContent = details.label || `SpectorClient ${modsTargetVersion}`;
-  $('modsDescription').innerHTML = `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
+  $('modSelectedVersionLabel').textContent = globalContent
+    ? `Global ${meta.label}`
+    : (details.label || `SpectorClient ${modsTargetVersion}`);
+  if ($('changeModVersionBtn')) $('changeModVersionBtn').textContent = globalContent ? 'Change compatibility' : 'Change version';
+  $('modsDescription').innerHTML = globalContent
+    ? `<b>${escapeHtml(meta.label)}</b> are shared across every SpectorClient version. Compatibility filter: <b>Minecraft ${escapeHtml(modsTargetVersion)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`
+    : `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
   $('modSearchInput').placeholder = `Search ${providerName()} for Minecraft ${modsTargetVersion} ${meta.label.toLowerCase()}...`;
   $('modBrowseSubtitle').textContent = meta.fabric
     ? `Fabric + Minecraft ${modsTargetVersion}`
-    : `Minecraft ${modsTargetVersion} compatible ${meta.label.toLowerCase()}`;
+    : `Global folder • Minecraft ${modsTargetVersion} compatibility`;
   $('modManagerStatus').textContent = `Loading installed ${meta.label.toLowerCase()}…`;
   syncContentUiLabels();
   activeModTab = 'install';
@@ -637,7 +690,7 @@ async function syncSocialConnection(force = false) {
   renderSocial();
 }
 
-function showView(name) {
+function showView(name, options = {}) {
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.classList.remove('active'));
   const view = $(`view-${name}`);
@@ -648,13 +701,14 @@ function showView(name) {
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
-    // Default Content to the same client version selected on the Home/Play screen.
-    // Change version still lets the user switch the compatibility target independently.
+    // Default Content to the Home/Play version, but allow direct version-card links
+    // to open Content for a different version without changing the Play version.
+    const targetVersion = normalizeGameVersion(options.modsVersion || selectedGameVersion());
     resetModsVersionSelection();
-    void selectModsVersion(selectedGameVersion()).catch((error) => {
+    void selectModsVersion(targetVersion).catch((error) => {
       resetModsVersionSelection();
       if ($('modsDescription')) {
-        $('modsDescription').textContent = `Could not load content for SpectorClient ${selectedGameVersion()}: ${error.message}`;
+        $('modsDescription').textContent = `Could not load content for SpectorClient ${targetVersion}: ${error.message}`;
       }
       showToast(`Could not load content: ${error.message}`);
     });
@@ -1027,9 +1081,7 @@ function renderInstalledMods() {
     const icon = item.iconUrl
       ? `<img class="mod-icon" src="${escapeHtml(item.iconUrl)}" alt="" />`
       : `<div class="mod-icon">${escapeHtml((item.title || item.filename).slice(0, 1).toUpperCase())}</div>`;
-    const source = item.source || '';
-    const sourceBadge = source ? `<span class="content-source-badge"><img src="${providerLogo(source)}" alt="" />${source === 'curseforge' ? 'CurseForge' : 'Modrinth'}</span>` : '';
-    const tags = `${item.core ? '<span class="core-pill">CORE</span>' : ''}${item.dependency ? '<span class="dep-pill">DEPENDENCY</span>' : ''}${sourceBadge}`;
+    const tags = `${item.core ? '<span class="core-pill">CORE</span>' : ''}${item.dependency ? '<span class="dep-pill">DEPENDENCY</span>' : ''}`;
     const detail = [item.versionNumber, item.size ? formatBytes(item.size) : item.directory ? 'Folder' : '', item.filename].filter(Boolean).join(' • ');
     let actions = item.core ? '<span class="core-pill">REQUIRED</span>' : '';
     if (!item.core) {
@@ -1154,12 +1206,11 @@ function renderSearchResults() {
     const icon = item.iconUrl
       ? `<img class="mod-icon" src="${escapeHtml(item.iconUrl)}" alt="" />`
       : `<div class="mod-icon">${escapeHtml(item.title.slice(0, 1).toUpperCase())}</div>`;
-    const sourceBadge = `<span class="content-source-badge"><img src="${providerLogo(source)}" alt="" />${source === 'curseforge' ? 'CurseForge' : 'Modrinth'}</span>`;
     return `
       <article class="mod-card">
         ${icon}
         <div class="mod-card-main">
-          <div class="mod-card-title-line"><h4>${escapeHtml(item.title)}</h4>${sourceBadge}<span class="mod-card-author">by ${escapeHtml(item.author)}</span></div>
+          <div class="mod-card-title-line"><h4>${escapeHtml(item.title)}</h4><span class="mod-card-author">by ${escapeHtml(item.author)}</span></div>
           <p>${escapeHtml(item.description)}</p>
           <div class="mod-card-foot">
             <span class="downloads">↓ ${formatDownloads(item.downloads)} downloads</span>
@@ -1310,13 +1361,19 @@ window.launcher.onUiScale((data) => {
 // Home
 $('versionBtn').addEventListener('click', () => showView('versions'));
 $('versionBackBtn').addEventListener('click', () => showView('home'));
-document.querySelectorAll('[data-game-version]').forEach((button) => {
+document.querySelectorAll('[data-version-use]').forEach((button) => {
   button.addEventListener('click', async () => {
-    settings.selectedGameVersion = normalizeGameVersion(button.dataset.gameVersion);
+    settings.selectedGameVersion = normalizeGameVersion(button.dataset.versionUse);
     settings = await window.launcher.saveSettings(collectSettings());
     renderSelectedVersionUI();
     showView('home');
-    showToast(`Selected SpectorClient ${settings.selectedGameVersion}.`);
+    showToast(`Using SpectorClient ${settings.selectedGameVersion}.`);
+  });
+});
+document.querySelectorAll('[data-version-content]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const gameVersion = normalizeGameVersion(button.dataset.versionContent);
+    showView('mods', { modsVersion: gameVersion });
   });
 });
 $('playBtn').addEventListener('click', async () => {
@@ -1369,15 +1426,26 @@ $('modSearchInput').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') searchMods($('modSearchInput').value, 1);
 });
 
-$('contentTypeSelect').addEventListener('change', async () => {
-  activeContentType = normalizeContentTypeUi($('contentTypeSelect').value);
-  modBrowseLoaded = false;
-  modStatuses = {};
-  lastSearchResults = [];
-  modSearchQuery = '';
-  modSearchPage = 1;
-  syncContentUiLabels();
-  if (modsTargetVersion) await selectModsVersion(modsTargetVersion);
+$('contentTypeButton').addEventListener('click', (event) => {
+  event.stopPropagation();
+  const open = $('contentTypeMenu').classList.contains('hidden');
+  setContentTypeMenuOpen(open);
+});
+document.querySelectorAll('[data-content-type-option]').forEach((button) => {
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    try {
+      await setActiveContentType(button.dataset.contentTypeOption);
+    } catch (error) {
+      showToast(`Could not switch content type: ${error.message}`);
+    }
+  });
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('#contentTypePicker')) setContentTypeMenuOpen(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setContentTypeMenuOpen(false);
 });
 
 document.querySelectorAll('[data-content-provider]').forEach((button) => {

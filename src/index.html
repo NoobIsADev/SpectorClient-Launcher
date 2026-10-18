@@ -111,7 +111,7 @@
         </div>
 
         <div class="version-select-grid">
-          <button class="client-version-card" data-game-version="26.2">
+          <article class="client-version-card" data-game-version="26.2">
             <div class="client-version-icon">26</div>
             <div class="client-version-copy">
               <span class="version-card-kicker">SPECTORCLIENT</span>
@@ -119,10 +119,13 @@
               <p>Fabric • Migrated dedicated instance</p>
               <code id="versionModsPath26">SpectorClient data/instances/26.2/mods</code>
             </div>
-            <span class="version-card-action">Select →</span>
-          </button>
+            <div class="client-version-actions">
+              <button class="version-action-btn version-use-btn" type="button" data-version-use="26.2">Use</button>
+              <button class="version-action-btn" type="button" data-version-content="26.2">Content</button>
+            </div>
+          </article>
 
-          <button class="client-version-card" data-game-version="26.3">
+          <article class="client-version-card" data-game-version="26.3">
             <div class="client-version-icon">26</div>
             <div class="client-version-copy">
               <span class="version-card-kicker">SPECTORCLIENT</span>
@@ -130,10 +133,13 @@
               <p>Fabric • Dedicated instance and mods</p>
               <code id="versionModsPath263">SpectorClient data/instances/26.3/mods</code>
             </div>
-            <span class="version-card-action">Select →</span>
-          </button>
+            <div class="client-version-actions">
+              <button class="version-action-btn version-use-btn" type="button" data-version-use="26.3">Use</button>
+              <button class="version-action-btn" type="button" data-version-content="26.3">Content</button>
+            </div>
+          </article>
 
-          <button class="client-version-card" data-game-version="1.21.11">
+          <article class="client-version-card" data-game-version="1.21.11">
             <div class="client-version-icon">1.21</div>
             <div class="client-version-copy">
               <span class="version-card-kicker">SPECTORCLIENT</span>
@@ -141,8 +147,11 @@
               <p>Fabric • Dedicated instance and mods</p>
               <code id="versionModsPath12111">SpectorClient data/instances/1.21.11/mods</code>
             </div>
-            <span class="version-card-action">Select →</span>
-          </button>
+            <div class="client-version-actions">
+              <button class="version-action-btn version-use-btn" type="button" data-version-use="1.21.11">Use</button>
+              <button class="version-action-btn" type="button" data-version-content="1.21.11">Content</button>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -150,11 +159,29 @@
         <div class="section-head content-section-head">
           <div>
             <div class="overline">CONTENT MANAGER</div>
-            <select id="contentTypeSelect" class="content-type-select" aria-label="Content type">
-              <option value="mods">Mods</option>
-              <option value="resourcepacks">Resource Packs</option>
-              <option value="shaders">Shaders</option>
-            </select>
+            <div id="contentTypePicker" class="content-type-picker">
+              <button id="contentTypeButton" class="content-type-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                <span id="contentTypeLabel">Mods</span>
+                <svg class="content-type-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg>
+              </button>
+              <div id="contentTypeMenu" class="content-type-menu hidden" role="listbox" aria-label="Content type">
+                <button class="content-type-option active" type="button" data-content-type-option="mods" role="option" aria-selected="true">
+                  <span class="content-type-option-icon">M</span>
+                  <span class="content-type-option-copy"><b>Mods</b><small>Version-specific Fabric mods</small></span>
+                  <span class="content-type-option-check">✓</span>
+                </button>
+                <button class="content-type-option" type="button" data-content-type-option="resourcepacks" role="option" aria-selected="false">
+                  <span class="content-type-option-icon">R</span>
+                  <span class="content-type-option-copy"><b>Resource Packs</b><small>Shared across every client version</small></span>
+                  <span class="content-type-option-check">✓</span>
+                </button>
+                <button class="content-type-option" type="button" data-content-type-option="shaders" role="option" aria-selected="false">
+                  <span class="content-type-option-icon">S</span>
+                  <span class="content-type-option-copy"><b>Shaders</b><small>Shared across every client version</small></span>
+                  <span class="content-type-option-check">✓</span>
+                </button>
+              </div>
+            </div>
             <p id="modsDescription">Manage compatible Minecraft content from Modrinth or CurseForge.</p>
           </div>
           <button id="openModsFolderBtn" class="secondary-btn" disabled>Open mods folder</button>
