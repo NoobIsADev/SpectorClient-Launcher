@@ -27,6 +27,9 @@
         <button class="rail-btn" data-view="accounts" title="Accounts" aria-label="Accounts">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Z"/></svg>
         </button>
+        <button class="rail-btn" data-view="cosmetics" title="Skins" aria-label="Skins">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 8.6 5.4 5 4.5 3 9l3 2.2V21h12v-9.8L21 9l-2-4.5-3.6.9L12 2Zm0 3.1 2.7 2.7 2.8-.7.8 1.8-2.3 1.7V18H8v-7.4L5.7 8.9l.8-1.8 2.8.7L12 5.1Z"/></svg>
+        </button>
       </nav>
 
       <div class="rail-bottom">
@@ -271,6 +274,71 @@
         <div id="accountsList" class="account-grid"></div>
       </section>
 
+      <section id="view-cosmetics" class="view scroll-view">
+        <div class="section-head cosmetics-section-head">
+          <div>
+            <div class="overline">PLAYER APPEARANCE</div>
+            <h2>Skins</h2>
+            <p>Manage the skin and owned Minecraft Java capes for your currently selected Microsoft account.</p>
+          </div>
+          <button id="refreshCosmeticsBtn" class="secondary-btn">Refresh</button>
+        </div>
+
+        <div id="cosmeticsSignedOut" class="empty-state compact-empty">
+          <div><b>Sign in to customize your player</b><span>Select a Microsoft account first, then come back to Skins.</span></div>
+        </div>
+
+        <div id="cosmeticsContent" class="cosmetics-layout hidden">
+          <div class="cosmetics-account-strip">
+            <img id="cosmeticsAccountAvatar" class="account-avatar" alt="" />
+            <div><small>SELECTED ACCOUNT</small><b id="cosmeticsAccountName">Minecraft Player</b><span id="cosmeticsAccountUuid"></span></div>
+          </div>
+
+          <section class="cosmetics-card cosmetics-skin-card">
+            <div class="cosmetics-card-head">
+              <div><span class="version-card-kicker">MINECRAFT SKIN</span><h3>Your skin</h3><p>Upload a 64×64 or legacy 64×32 PNG and choose the player model.</p></div>
+              <span id="cosmeticsSkinModelBadge" class="cosmetics-status-badge">CLASSIC</span>
+            </div>
+            <div class="cosmetics-skin-grid">
+              <div class="cosmetics-player-preview">
+                <img id="cosmeticsCurrentSkin" alt="Current Minecraft skin" />
+              </div>
+              <div class="cosmetics-skin-controls">
+                <div id="cosmeticsSkinFile" class="cosmetics-file-box">
+                  <div class="cosmetics-file-preview-wrap">
+                    <img id="cosmeticsSkinUploadPreview" class="skin-upload-preview hidden" alt="Selected Minecraft skin texture" />
+                    <div id="cosmeticsSkinUploadPlaceholder" class="cosmetics-file-placeholder">PNG</div>
+                  </div>
+                  <div class="skin-upload-meta">
+                    <b id="cosmeticsSkinFileName">No skin selected</b>
+                    <span id="cosmeticsSkinFileMeta">Choose a Minecraft skin PNG to preview it.</span>
+                  </div>
+                </div>
+                <div class="skin-model-picker" role="radiogroup" aria-label="Skin model">
+                  <button type="button" class="skin-model-option active" data-cosmetic-skin-variant="classic" role="radio" aria-checked="true"><b>Classic</b><span>Wide arms</span></button>
+                  <button type="button" class="skin-model-option" data-cosmetic-skin-variant="slim" role="radio" aria-checked="false"><b>Slim</b><span>Slim arms</span></button>
+                </div>
+                <div class="cosmetics-actions">
+                  <button id="chooseCosmeticsSkinBtn" class="secondary-btn">Choose skin</button>
+                  <button id="applyCosmeticsSkinBtn" class="accent-btn" disabled>Apply skin</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="cosmetics-card cosmetics-cape-card">
+            <div class="cosmetics-card-head">
+              <div><span class="version-card-kicker">MINECRAFT CAPE</span><h3>Your capes</h3><p>Preview every cape owned by this account and choose which one appears in-game.</p></div>
+              <button id="disableCapeBtn" class="secondary-btn" disabled>No cape</button>
+            </div>
+            <div id="activeCapeSummary" class="active-cape-summary hidden"></div>
+            <div id="capeGrid" class="cape-grid">
+              <div class="cosmetics-loading">Loading owned capes…</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
       <section id="view-settings" class="view scroll-view">
         <div class="section-head">
           <div>
@@ -353,11 +421,11 @@
           <div class="setting-card full-card">
             <h3>Java runtimes</h3>
             <label>Java 25 executable — SpectorClient 26.2 / 26.3</label>
-            <div class="field-action"><input id="java25Path" placeholder="Automatic: managed Java 25" /><button id="chooseJava25Btn" class="secondary-btn">Browse</button></div>
+            <div class="field-action java-field-action"><input id="java25Path" placeholder="Automatic: managed Java 25" /><button id="chooseJava25Btn" class="secondary-btn">Browse</button><button id="installJava25Btn" class="secondary-btn java-install-btn">Install</button><button id="repairJava25Btn" class="secondary-btn java-repair-btn">Repair</button></div>
             <p class="hint">26.2 and 26.3 automatically use the verified SpectorClient-managed Java 25 runtime. Leave this blank unless you want to override it.</p>
             <label style="margin-top:14px;display:block">Java 21 executable — SpectorClient 1.21.11</label>
-            <div class="field-action"><input id="java21Path" placeholder="Automatic: managed Java 21" /><button id="chooseJava21Btn" class="secondary-btn">Browse</button></div>
-            <p class="hint">1.21.11 automatically downloads and uses a separate verified Java 21 runtime.</p>
+            <div class="field-action java-field-action"><input id="java21Path" placeholder="Automatic: managed Java 21" /><button id="chooseJava21Btn" class="secondary-btn">Browse</button><button id="installJava21Btn" class="secondary-btn java-install-btn">Install</button><button id="repairJava21Btn" class="secondary-btn java-repair-btn">Repair</button></div>
+            <p class="hint">1.21.11 automatically downloads and uses a separate verified Java 21 runtime. Repair fully removes SpectorClient's managed runtime and downloads a fresh verified copy.</p>
           </div>
 
           <div class="setting-card full-card">

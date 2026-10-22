@@ -2658,3 +2658,265 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
 #modInstallPanel .content-provider-switch {
   margin-top: 0;
 }
+
+/* v1.6.37 — Java repair + Minecraft skin changer */
+.java-field-action { flex-wrap: wrap; }
+.java-field-action input { min-width: 320px; }
+.java-install-btn,
+.java-repair-btn { min-width: 70px; }
+.java-repair-btn {
+  border-color: rgb(var(--accent-rgb) / .34);
+  background: rgb(var(--accent-rgb) / .11);
+  color: color-mix(in srgb, var(--blue-2) 84%, white);
+}
+.java-repair-btn:hover {
+  border-color: rgb(var(--accent-rgb) / .56);
+  background: rgb(var(--accent-rgb) / .18);
+}
+
+.skin-modal-card { width: min(470px, 100%); }
+.skin-upload-preview-wrap {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 16px 0;
+  padding: 13px;
+  border: 1px solid rgb(var(--accent-rgb) / .20);
+  border-radius: 12px;
+  background: rgb(var(--surface-0-rgb) / .55);
+  text-align: left;
+}
+.skin-upload-preview {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--accent-rgb) / .24);
+  background:
+    linear-gradient(45deg, rgba(255,255,255,.045) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,.045) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,.045) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.045) 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+.skin-upload-meta { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.skin-upload-meta b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skin-upload-meta span { color: var(--theme-muted); font-size: 8px; }
+.skin-model-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 0 0 14px; }
+.skin-model-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgb(var(--accent-rgb) / .18);
+  border-radius: 10px;
+  background: rgb(var(--accent-rgb) / .05);
+  color: var(--theme-text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
+}
+.skin-model-option:hover { border-color: rgb(var(--accent-rgb) / .38); transform: translateY(-1px); }
+.skin-model-option.active {
+  border-color: rgb(var(--accent-rgb) / .58);
+  background: rgb(var(--accent-rgb) / .14);
+  box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / .08);
+}
+.skin-model-option b { font-size: 10px; }
+.skin-model-option span { color: var(--theme-muted); font-size: 7px; }
+.skin-modal-card .wide + .wide { margin-top: 8px; }
+
+@media (max-width: 900px) {
+  .java-field-action input { min-width: 100%; width: 100%; }
+  .java-field-action .secondary-btn { flex: 1; }
+}
+
+/* v1.6.38 — dedicated Minecraft Cosmetics page */
+.cosmetics-layout { display: grid; gap: 16px; }
+.cosmetics-account-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgb(var(--accent-rgb) / .18);
+  border-radius: 12px;
+  background: linear-gradient(110deg, rgb(var(--accent-rgb) / .08), rgb(var(--surface-0-rgb) / .72));
+}
+.cosmetics-account-strip > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cosmetics-account-strip small { color: var(--blue); font-size: 7px; font-weight: 900; letter-spacing: 1.5px; }
+.cosmetics-account-strip b { font-size: 13px; }
+.cosmetics-account-strip span { color: var(--theme-muted); font-size: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cosmetics-card {
+  padding: 18px;
+  border: 1px solid rgb(var(--accent-rgb) / .17);
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 92% 8%, rgb(var(--accent-rgb) / .09), transparent 36%),
+    rgb(var(--surface-0-rgb) / .72);
+  box-shadow: 0 18px 48px rgba(0,0,0,.16);
+}
+.cosmetics-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 16px; }
+.cosmetics-card-head h3 { margin: 4px 0 4px; font-size: 19px; letter-spacing: -.45px; }
+.cosmetics-card-head p { margin: 0; max-width: 560px; color: var(--theme-muted); font-size: 8px; line-height: 1.55; }
+.cosmetics-status-badge {
+  flex: 0 0 auto;
+  padding: 7px 9px;
+  border: 1px solid rgb(var(--accent-rgb) / .28);
+  border-radius: 999px;
+  background: rgb(var(--accent-rgb) / .09);
+  color: var(--blue-2);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.cosmetics-skin-grid { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.3fr); gap: 18px; align-items: stretch; }
+.cosmetics-player-preview {
+  min-height: 300px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid rgb(var(--accent-rgb) / .16);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 50% 58%, rgb(var(--accent-rgb) / .16), transparent 44%),
+    linear-gradient(180deg, rgb(var(--accent-rgb) / .035), rgba(0,0,0,.16));
+}
+.cosmetics-player-preview img {
+  width: auto;
+  height: 278px;
+  max-width: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 18px 24px rgba(0,0,0,.5));
+}
+.cosmetics-skin-controls { display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+.cosmetics-file-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px;
+  border: 1px dashed rgb(var(--accent-rgb) / .28);
+  border-radius: 12px;
+  background: rgb(var(--accent-rgb) / .04);
+}
+.cosmetics-file-preview-wrap { width: 84px; height: 84px; flex: 0 0 84px; position: relative; }
+.cosmetics-file-preview-wrap .skin-upload-preview { width: 84px; height: 84px; }
+.cosmetics-file-placeholder {
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(var(--accent-rgb) / .18);
+  border-radius: 8px;
+  background: rgba(0,0,0,.18);
+  color: rgb(var(--accent-rgb) / .6);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+.cosmetics-actions { display: flex; gap: 9px; }
+.cosmetics-actions > button { flex: 1; }
+
+.active-cape-summary {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: -2px 0 14px;
+  padding: 12px 13px;
+  border: 1px solid rgb(var(--accent-rgb) / .22);
+  border-radius: 12px;
+  background: rgb(var(--accent-rgb) / .07);
+}
+.active-cape-summary > div:last-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.active-cape-summary small { color: var(--blue); font-size: 7px; font-weight: 900; letter-spacing: 1.3px; }
+.active-cape-summary b { font-size: 11px; }
+.active-cape-summary span { color: var(--theme-muted); font-size: 7px; }
+
+.cape-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.cape-card {
+  position: relative;
+  min-height: 150px;
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgb(var(--accent-rgb) / .16);
+  border-radius: 12px;
+  background: rgb(var(--surface-0-rgb) / .58);
+  color: var(--theme-text);
+  cursor: pointer;
+  text-align: left;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.cape-card:hover { transform: translateY(-2px); border-color: rgb(var(--accent-rgb) / .38); background: rgb(var(--accent-rgb) / .07); }
+.cape-card.active { border-color: rgb(var(--accent-rgb) / .58); background: rgb(var(--accent-rgb) / .12); box-shadow: inset 0 0 0 1px rgb(var(--accent-rgb) / .08); cursor: default; }
+.cape-card-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.cape-card-copy b { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cape-card-copy span { color: var(--theme-muted); font-size: 7px; }
+.cape-card em {
+  position: absolute;
+  right: 10px;
+  bottom: 9px;
+  color: var(--blue-2);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+.cape-card.active em { color: var(--blue); }
+
+/* Minecraft cape textures store the 10x16 front face at texture position 1,1.
+   Scaling the original texture and clipping that area gives an actual visual
+   preview instead of a generic cape icon. */
+.cape-texture-preview {
+  position: relative;
+  width: 60px;
+  height: 96px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--accent-rgb) / .22);
+  border-radius: 5px;
+  background: rgba(0,0,0,.24);
+  box-shadow: 0 9px 22px rgba(0,0,0,.22);
+}
+.cape-texture-preview img {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 384px;
+  height: auto;
+  max-width: none;
+  image-rendering: pixelated;
+}
+.cape-texture-preview.small { width: 40px; height: 64px; flex: 0 0 40px; }
+.cape-texture-preview.small img { left: -4px; top: -4px; width: 256px; }
+
+.cosmetics-loading,
+.cosmetics-empty-capes {
+  grid-column: 1 / -1;
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed rgb(var(--accent-rgb) / .18);
+  border-radius: 12px;
+  color: var(--theme-muted);
+  text-align: center;
+  font-size: 8px;
+}
+.cosmetics-empty-capes b { color: var(--theme-text); font-size: 11px; }
+.cosmetics-empty-capes span { max-width: 380px; line-height: 1.5; }
+
+@media (max-width: 1050px) {
+  .cosmetics-skin-grid { grid-template-columns: 1fr; }
+  .cosmetics-player-preview { min-height: 250px; }
+  .cosmetics-player-preview img { height: 230px; }
+}

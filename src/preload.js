@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('launcher', {
   selectAccount: (id) => ipcRenderer.invoke('account:select', id),
   removeAccount: (id) => ipcRenderer.invoke('account:remove', id),
   getSkinData: (id) => ipcRenderer.invoke('account:skin-data', id),
+  chooseSkinFile: () => ipcRenderer.invoke('account:choose-skin'),
+  applySkin: (accountId, filePath, variant) => ipcRenderer.invoke('account:apply-skin', accountId, filePath, variant),
+  getCosmetics: (accountId) => ipcRenderer.invoke('account:get-cosmetics', accountId),
+  applyCape: (accountId, capeId = null) => ipcRenderer.invoke('account:apply-cape', accountId, capeId),
 
   listMods: (gameVersion) => ipcRenderer.invoke('mods:list', gameVersion),
   searchMods: (gameVersion, query, page = 1) => ipcRenderer.invoke('mods:search', gameVersion, query, page),
@@ -40,6 +44,8 @@ contextBridge.exposeInMainWorld('launcher', {
   setSocialPresenceMode: (mode) => ipcRenderer.invoke('social:set-presence-mode', mode),
 
   chooseJava: (major = 25) => ipcRenderer.invoke('dialog:choose-java', major),
+  installJava: (major = 25) => ipcRenderer.invoke('java:install', major),
+  repairJava: (major = 25) => ipcRenderer.invoke('java:repair', major),
   openClientFolder: () => ipcRenderer.invoke('folder:open-client'),
   openModsFolder: (gameVersion) => ipcRenderer.invoke('folder:open-mods', gameVersion),
   openContentFolder: (gameVersion, contentType) => ipcRenderer.invoke('folder:open-content', gameVersion, contentType),

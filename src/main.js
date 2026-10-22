@@ -893,6 +893,45 @@ async function ensureManagedJava(major, { force = false } = {}) {
   return javaInstallPromises.get(major);
 }
 
+async function removeManagedJavaCompletely(major) {
+  major = Number(major) === 21 ? 21 : 25;
+  if (activeGameProcess && activeGameProcess.exitCode == null) {
+    throw new Error(`Close Minecraft before repairing Java ${major}.`);
+  }
+
+  // Let an in-flight install finish before removing anything so two installers
+  // never mutate the same runtime directory at once.
+  const inFlight = javaInstallPromises.get(major);
+  if (inFlight) await inFlight.catch(() => {});
+
+  const runtimeRoot = path.join(APPDATA_ROOT, 'runtime');
+  const entries = await fsp.readdir(runtimeRoot, { withFileTypes: true }).catch(() => []);
+  const prefixes = [`java-${major}`, `.java-${major}-install-`];
+  for (const entry of entries) {
+    if (!prefixes.some((prefix) => entry.name === prefix || entry.name.startsWith(`${prefix}.`) || entry.name.startsWith(`${prefix}-`) || entry.name.startsWith(prefix))) continue;
+    await fsp.rm(path.join(runtimeRoot, entry.name), { recursive: true, force: true }).catch(() => {});
+  }
+
+  const downloads = await fsp.readdir(JAVA_RUNTIME_DOWNLOAD_DIR, { withFileTypes: true }).catch(() => []);
+  for (const entry of downloads) {
+    if (entry.name.startsWith(`temurin-${major}-`)) {
+      await fsp.rm(path.join(JAVA_RUNTIME_DOWNLOAD_DIR, entry.name), { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
+async function repairManagedJava(major) {
+  major = Number(major) === 21 ? 21 : 25;
+  log(`[Java] Repair requested for managed Java ${major}. Removing the existing runtime completely.`, 'launcher');
+  send('install-state', { step: `Java ${major}`, message: `Repairing Java ${major}…` });
+  await removeManagedJavaCompletely(major);
+  const javaExecutable = await ensureManagedJava(major, { force: true });
+  const inspection = await inspectJava(javaExecutable, major);
+  if (!inspection.ok) throw new Error(`Java ${major} repair completed, but verification failed: ${inspection.reason}`);
+  log(`[Java] Managed Java ${major} repair completed successfully.`, 'launcher');
+  return { ok: true, major, javaExecutable };
+}
+
 async function loadSettings() {
   await ensureDirs();
   try {
@@ -3202,6 +3241,192 @@ function bindLauncherEvents() {
   });
 }
 
+async function inspectSkinPng(filePath) {
+  const stat = await fsp.stat(filePath).catch(() => null);
+  if (!stat?.isFile()) throw new Error('The selected skin file does not exist.');
+  if (stat.size > 2 * 1024 * 1024) throw new Error('Minecraft skin PNGs must be 2 MB or smaller.');
+
+  const bytes = await fsp.readFile(filePath);
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(signature)) {
+    throw new Error('Minecraft skins must be valid PNG files.');
+  }
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  if (width !== 64 || ![32, 64].includes(height)) {
+    throw new Error(`Minecraft Java skins must be 64×64 or legacy 64×32 PNGs. This image is ${width}×${height}.`);
+  }
+  return { bytes, width, height, size: stat.size };
+}
+
+async function minecraftServiceJson(url, token, options = {}) {
+  if (typeof fetch !== 'function') throw new Error('This SpectorClient build cannot access the Minecraft profile service.');
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); }
+    catch { data = null; }
+  }
+  if (!response.ok) {
+    const detail = data?.errorMessage || data?.error || text || `HTTP ${response.status}`;
+    const error = new Error(`Minecraft profile service rejected the request: ${String(detail).slice(0, 260)}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+function normalizeMinecraftTextureUrl(value) {
+  const url = String(value || '').trim();
+  if (/^http:\/\/textures\.minecraft\.net\//i.test(url)) return url.replace(/^http:/i, 'https:');
+  return url;
+}
+
+async function uploadMinecraftSkin(accountId, filePath, variant) {
+  variant = String(variant || '').toLowerCase() === 'slim' ? 'slim' : 'classic';
+  const settings = await loadSettings();
+  const account = settings.accounts.find((entry) => entry.id === accountId);
+  if (!account) throw new Error('Account not found.');
+
+  const skin = await inspectSkinPng(filePath);
+  const session = await getMinecraftSession(account.id, false);
+  if (typeof FormData !== 'function' || typeof Blob !== 'function') {
+    throw new Error('This SpectorClient build cannot create a Minecraft skin upload.');
+  }
+
+  const form = new FormData();
+  form.append('variant', variant);
+  form.append('file', new Blob([skin.bytes], { type: 'image/png' }), path.basename(filePath));
+
+  let profile = await minecraftServiceJson(
+    'https://api.minecraftservices.com/minecraft/profile/skins',
+    session.token,
+    { method: 'POST', body: form }
+  );
+
+  // Some service responses may be empty even after a successful upload. Fetch
+  // the profile once so the launcher can immediately use the new texture URL.
+  if (!profile?.id) {
+    profile = await minecraftServiceJson(
+      'https://api.minecraftservices.com/minecraft/profile',
+      session.token,
+      { method: 'GET' }
+    );
+  }
+
+  const activeSkin = profile?.skins?.find((entry) => String(entry.state || '').toUpperCase() === 'ACTIVE')
+    || profile?.skins?.[0];
+  const skinChangedAt = Date.now();
+  const updatedAccount = {
+    ...account,
+    name: profile?.name || account.name,
+    uuid: profile?.id || account.uuid,
+    skinUrl: normalizeMinecraftTextureUrl(activeSkin?.url) || account.skinUrl || '',
+    skinVariant: String(activeSkin?.variant || variant).toLowerCase(),
+    skinChangedAt
+  };
+  settings.accounts = settings.accounts.map((entry) => entry.id === accountId ? updatedAccount : entry);
+  await saveSettings(settings);
+  log(`[Account] Updated Minecraft skin for ${updatedAccount.name} (${variant}).`, 'launcher');
+  return { account: updatedAccount, profile: normalizeMinecraftProfile(profile), width: skin.width, height: skin.height };
+}
+
+
+function normalizeMinecraftProfile(profile = {}) {
+  return {
+    ...profile,
+    skins: Array.isArray(profile?.skins) ? profile.skins.map((skin) => ({
+      ...skin,
+      url: normalizeMinecraftTextureUrl(skin?.url),
+      variant: String(skin?.variant || 'CLASSIC').toUpperCase()
+    })) : [],
+    capes: Array.isArray(profile?.capes) ? profile.capes.map((cape) => ({
+      ...cape,
+      url: normalizeMinecraftTextureUrl(cape?.url),
+      alias: String(cape?.alias || 'Minecraft Cape')
+    })) : []
+  };
+}
+
+async function updateAccountFromMinecraftProfile(settings, account, rawProfile) {
+  const profile = normalizeMinecraftProfile(rawProfile || {});
+  const activeSkin = profile.skins.find((entry) => String(entry.state || '').toUpperCase() === 'ACTIVE') || profile.skins[0];
+  const activeCape = profile.capes.find((entry) => String(entry.state || '').toUpperCase() === 'ACTIVE') || null;
+  const next = {
+    ...account,
+    name: profile?.name || account.name,
+    uuid: profile?.id || account.uuid,
+    skinUrl: normalizeMinecraftTextureUrl(activeSkin?.url) || account.skinUrl || '',
+    skinVariant: String(activeSkin?.variant || account.skinVariant || 'classic').toLowerCase(),
+    activeCapeId: activeCape?.id || null,
+    activeCapeAlias: activeCape?.alias || '',
+    activeCapeUrl: normalizeMinecraftTextureUrl(activeCape?.url) || '',
+    cosmeticsChangedAt: Date.now()
+  };
+  settings.accounts = settings.accounts.map((entry) => entry.id === account.id ? next : entry);
+  await saveSettings(settings);
+  return { profile, account: next };
+}
+
+async function getMinecraftCosmetics(accountId) {
+  const settings = await loadSettings();
+  const account = settings.accounts.find((entry) => entry.id === accountId);
+  if (!account) throw new Error('Account not found.');
+  const session = await getMinecraftSession(account.id, false);
+  const rawProfile = await minecraftServiceJson(
+    'https://api.minecraftservices.com/minecraft/profile',
+    session.token,
+    { method: 'GET' }
+  );
+  return updateAccountFromMinecraftProfile(settings, account, rawProfile);
+}
+
+async function setMinecraftCape(accountId, capeId) {
+  const settings = await loadSettings();
+  const account = settings.accounts.find((entry) => entry.id === accountId);
+  if (!account) throw new Error('Account not found.');
+  const session = await getMinecraftSession(account.id, false);
+
+  let rawProfile = null;
+  if (capeId) {
+    rawProfile = await minecraftServiceJson(
+      'https://api.minecraftservices.com/minecraft/profile/capes/active',
+      session.token,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capeId: String(capeId) })
+      }
+    );
+  } else {
+    rawProfile = await minecraftServiceJson(
+      'https://api.minecraftservices.com/minecraft/profile/capes/active',
+      session.token,
+      { method: 'DELETE' }
+    );
+  }
+
+  if (!rawProfile?.id) {
+    rawProfile = await minecraftServiceJson(
+      'https://api.minecraftservices.com/minecraft/profile',
+      session.token,
+      { method: 'GET' }
+    );
+  }
+  const result = await updateAccountFromMinecraftProfile(settings, account, rawProfile);
+  const activeCape = result.profile.capes.find((entry) => String(entry.state || '').toUpperCase() === 'ACTIVE') || null;
+  log(`[Account] ${activeCape ? `Activated Minecraft cape ${activeCape.alias || activeCape.id}` : 'Disabled the active Minecraft cape'} for ${result.account.name}.`, 'launcher');
+  return result;
+}
+
 // ---------------------------
 // IPC
 // ---------------------------
@@ -3251,6 +3476,39 @@ ipcMain.handle('account:skin-data', async (_event, accountId) => {
     const bytes = await request(fallback, { binary: true });
     return `data:image/png;base64,${bytes.toString('base64')}`;
   }
+});
+
+ipcMain.handle('account:choose-skin', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose Minecraft skin',
+    properties: ['openFile'],
+    filters: [{ name: 'Minecraft skin PNG', extensions: ['png'] }]
+  });
+  if (result.canceled || !result.filePaths?.[0]) return null;
+  const filePath = result.filePaths[0];
+  const skin = await inspectSkinPng(filePath);
+  return {
+    filePath,
+    fileName: path.basename(filePath),
+    width: skin.width,
+    height: skin.height,
+    dataUrl: `data:image/png;base64,${skin.bytes.toString('base64')}`
+  };
+});
+
+ipcMain.handle('account:apply-skin', async (_event, accountId, filePath, variant) => {
+  if (!accountId || !filePath) throw new Error('Choose a Minecraft skin first.');
+  return uploadMinecraftSkin(accountId, filePath, variant);
+});
+
+ipcMain.handle('account:get-cosmetics', async (_event, accountId) => {
+  if (!accountId) throw new Error('Select a Minecraft account first.');
+  return getMinecraftCosmetics(accountId);
+});
+
+ipcMain.handle('account:apply-cape', async (_event, accountId, capeId = null) => {
+  if (!accountId) throw new Error('Select a Minecraft account first.');
+  return setMinecraftCape(accountId, capeId || null);
 });
 
 ipcMain.handle('client:info', async () => ({
@@ -3310,6 +3568,16 @@ ipcMain.handle('dialog:choose-java', async (_event, major = 25) => {
   }
   return selected;
 });
+
+ipcMain.handle('java:install', async (_event, major = 25) => {
+  const expectedMajor = Number(major) === 21 ? 21 : 25;
+  const javaExecutable = await ensureManagedJava(expectedMajor);
+  const inspection = await inspectJava(javaExecutable, expectedMajor);
+  if (!inspection.ok) throw new Error(`Managed Java ${expectedMajor} failed verification: ${inspection.reason}`);
+  return { ok: true, major: expectedMajor, javaExecutable };
+});
+
+ipcMain.handle('java:repair', async (_event, major = 25) => repairManagedJava(major));
 
 ipcMain.handle('folder:open-client', async () => {
   await ensureDirs();
@@ -3448,7 +3716,8 @@ ipcMain.handle('account:add', async () => {
       id: accountId,
       uuid: profile.id,
       name: profile.name,
-      skinUrl: profile.skins?.find((s) => s.state === 'ACTIVE')?.url || profile.skins?.[0]?.url || ''
+      skinUrl: normalizeMinecraftTextureUrl(profile.skins?.find((s) => s.state === 'ACTIVE')?.url || profile.skins?.[0]?.url || ''),
+      skinVariant: String(profile.skins?.find((s) => s.state === 'ACTIVE')?.variant || profile.skins?.[0]?.variant || 'classic').toLowerCase()
     };
     settings.accounts = [...settings.accounts.filter((a) => a.uuid !== account.uuid), account];
     settings.selectedAccountId = account.id;

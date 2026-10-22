@@ -23,6 +23,10 @@ let contentProvider = 'modrinth';
 let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
+let skinChangeState = { accountId: null, filePath: null, variant: 'classic' };
+let cosmeticsProfile = null;
+let cosmeticsAccountId = null;
+let cosmeticsLoading = false;
 
 let socialState = {
   endpoint: 'http://nyc1.nightly.host:25597',
@@ -158,11 +162,11 @@ function selectedAccount() {
 }
 
 function skinHeadUrl(account, size = 80) {
-  return account?.uuid ? `https://mc-heads.net/avatar/${encodeURIComponent(account.uuid)}/${size}` : '';
+  return account?.uuid ? `https://mc-heads.net/avatar/${encodeURIComponent(account.uuid)}/${size}${account.skinChangedAt ? `?v=${encodeURIComponent(account.skinChangedAt)}` : ''}` : '';
 }
 
 function skinBodyUrl(account) {
-  return account?.uuid ? `https://mc-heads.net/body/${encodeURIComponent(account.uuid)}/260` : '';
+  return account?.uuid ? `https://mc-heads.net/body/${encodeURIComponent(account.uuid)}/260${account.skinChangedAt ? `?v=${encodeURIComponent(account.skinChangedAt)}` : ''}` : '';
 }
 
 function ensureSkinViewer() {
@@ -711,6 +715,11 @@ function showView(name, options = {}) {
       showToast(`Could not load content: ${error.message}`);
     });
   }
+  if (name === 'cosmetics') {
+    void refreshCosmetics().catch((error) => {
+      showToast(`Could not load Skins: ${error.message}`, 4800);
+    });
+  }
 }
 
 document.querySelectorAll('.rail-btn[data-view]').forEach((button) => {
@@ -809,6 +818,9 @@ function renderAccountDropdown() {
       try {
         await window.launcher.selectAccount(button.dataset.accountId);
         settings.selectedAccountId = button.dataset.accountId;
+        cosmeticsProfile = null;
+        cosmeticsAccountId = null;
+        resetCosmeticsSkinSelection();
         renderAllAccountUI();
         drop.classList.add('hidden');
       } catch (error) {
@@ -834,6 +846,7 @@ function renderAccounts() {
       </div>
       <div class="account-actions">
         <button class="secondary-btn select-account" data-id="${escapeHtml(account.id)}">${account.id === settings.selectedAccountId ? 'Selected' : 'Use account'}</button>
+        <button class="secondary-btn open-cosmetics" data-id="${escapeHtml(account.id)}">Skins</button>
         <button class="danger-btn remove-account" data-id="${escapeHtml(account.id)}">Remove</button>
       </div>
     </div>
@@ -844,7 +857,26 @@ function renderAccounts() {
       try {
         await window.launcher.selectAccount(button.dataset.id);
         settings.selectedAccountId = button.dataset.id;
+        cosmeticsProfile = null;
+        cosmeticsAccountId = null;
         renderAllAccountUI();
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+  });
+
+  list.querySelectorAll('.open-cosmetics').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        if (settings.selectedAccountId !== button.dataset.id) {
+          await window.launcher.selectAccount(button.dataset.id);
+          settings.selectedAccountId = button.dataset.id;
+          cosmeticsProfile = null;
+          cosmeticsAccountId = null;
+          renderAllAccountUI();
+        }
+        showView('cosmetics');
       } catch (error) {
         showToast(error.message);
       }
@@ -857,6 +889,9 @@ function renderAccounts() {
       if (!window.confirm(`Remove ${account?.name || 'this account'} from SpectorClient?`)) return;
       try {
         settings = await window.launcher.removeAccount(button.dataset.id);
+        cosmeticsProfile = null;
+        cosmeticsAccountId = null;
+        resetCosmeticsSkinSelection();
         renderAllAccountUI();
       } catch (error) {
         showToast(error.message);
@@ -865,11 +900,144 @@ function renderAccounts() {
   });
 }
 
+function resetCosmeticsSkinSelection() {
+  skinChangeState = { accountId: null, filePath: null, variant: 'classic' };
+  const preview = $('cosmeticsSkinUploadPreview');
+  const placeholder = $('cosmeticsSkinUploadPlaceholder');
+  if (preview) {
+    preview.removeAttribute('src');
+    preview.classList.add('hidden');
+  }
+  if (placeholder) placeholder.classList.remove('hidden');
+  if ($('cosmeticsSkinFileName')) $('cosmeticsSkinFileName').textContent = 'No skin selected';
+  if ($('cosmeticsSkinFileMeta')) $('cosmeticsSkinFileMeta').textContent = 'Choose a Minecraft skin PNG to preview it.';
+  if ($('applyCosmeticsSkinBtn')) $('applyCosmeticsSkinBtn').disabled = true;
+  document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
+    const active = item.dataset.cosmeticSkinVariant === 'classic';
+    item.classList.toggle('active', active);
+    item.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
+}
+
+function capePreviewMarkup(cape, extraClass = '') {
+  const url = escapeHtml(cape?.url || '');
+  return `<div class="cape-texture-preview ${extraClass}"><img src="${url}" alt="${escapeHtml(cape?.alias || 'Minecraft cape')} preview" /></div>`;
+}
+
+function renderCosmetics() {
+  const account = selectedAccount();
+  const signedOut = $('cosmeticsSignedOut');
+  const content = $('cosmeticsContent');
+  if (!signedOut || !content) return;
+
+  if (!account) {
+    signedOut.classList.remove('hidden');
+    content.classList.add('hidden');
+    return;
+  }
+
+  signedOut.classList.add('hidden');
+  content.classList.remove('hidden');
+  $('cosmeticsAccountAvatar').src = skinHeadUrl(account, 96);
+  $('cosmeticsAccountName').textContent = account.name || 'Minecraft Player';
+  $('cosmeticsAccountUuid').textContent = account.uuid || '';
+  $('cosmeticsCurrentSkin').src = skinBodyUrl(account);
+  $('cosmeticsCurrentSkin').alt = `${account.name || 'Player'} Minecraft skin`;
+
+  const activeSkin = cosmeticsProfile?.skins?.find((skin) => String(skin.state || '').toUpperCase() === 'ACTIVE') || cosmeticsProfile?.skins?.[0];
+  const variant = String(activeSkin?.variant || account.skinVariant || 'classic').toUpperCase();
+  $('cosmeticsSkinModelBadge').textContent = variant === 'SLIM' ? 'SLIM' : 'CLASSIC';
+
+  const capeGrid = $('capeGrid');
+  if (cosmeticsLoading) {
+    capeGrid.innerHTML = '<div class="cosmetics-loading">Loading owned capes…</div>';
+    $('disableCapeBtn').disabled = true;
+    $('activeCapeSummary').classList.add('hidden');
+    return;
+  }
+
+  const capes = Array.isArray(cosmeticsProfile?.capes) ? cosmeticsProfile.capes : [];
+  const activeCape = capes.find((cape) => String(cape.state || '').toUpperCase() === 'ACTIVE') || null;
+  $('disableCapeBtn').disabled = !activeCape;
+
+  const summary = $('activeCapeSummary');
+  if (activeCape) {
+    summary.innerHTML = `${capePreviewMarkup(activeCape, 'small')}<div><small>ACTIVE CAPE</small><b>${escapeHtml(activeCape.alias || 'Minecraft Cape')}</b><span>Currently visible on your Minecraft Java profile.</span></div>`;
+    summary.classList.remove('hidden');
+  } else {
+    summary.innerHTML = '';
+    summary.classList.add('hidden');
+  }
+
+  if (!capes.length) {
+    capeGrid.innerHTML = '<div class="cosmetics-empty-capes"><b>No capes owned</b><span>This Minecraft account does not currently have any Java Edition capes available to equip.</span></div>';
+    return;
+  }
+
+  capeGrid.innerHTML = capes.map((cape) => {
+    const active = String(cape.state || '').toUpperCase() === 'ACTIVE';
+    return `<button class="cape-card ${active ? 'active' : ''}" type="button" data-cape-id="${escapeHtml(cape.id || '')}" ${active ? 'aria-current="true"' : ''}>
+      ${capePreviewMarkup(cape)}
+      <div class="cape-card-copy"><b>${escapeHtml(cape.alias || 'Minecraft Cape')}</b><span>${active ? 'Currently equipped' : 'Owned cape'}</span></div>
+      <em>${active ? 'Using' : 'Use'}</em>
+    </button>`;
+  }).join('');
+
+  capeGrid.querySelectorAll('[data-cape-id]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (button.classList.contains('active')) return;
+      const capeId = button.dataset.capeId;
+      const cape = capes.find((entry) => String(entry.id) === String(capeId));
+      button.disabled = true;
+      const original = button.querySelector('em')?.textContent || 'Use';
+      if (button.querySelector('em')) button.querySelector('em').textContent = 'Applying…';
+      try {
+        const result = await window.launcher.applyCape(account.id, capeId);
+        if (result?.account) settings.accounts = settings.accounts.map((entry) => entry.id === result.account.id ? result.account : entry);
+        cosmeticsProfile = result?.profile || cosmeticsProfile;
+        cosmeticsAccountId = account.id;
+        renderAllAccountUI();
+        playUiSound('success');
+        showToast(`${cape?.alias || 'Cape'} equipped.`, 3600);
+      } catch (error) {
+        button.disabled = false;
+        if (button.querySelector('em')) button.querySelector('em').textContent = original;
+        playUiSound('error');
+        showToast(error.message, 5200);
+      }
+    });
+  });
+}
+
+async function refreshCosmetics() {
+  const account = selectedAccount();
+  if (!account) {
+    cosmeticsProfile = null;
+    cosmeticsAccountId = null;
+    cosmeticsLoading = false;
+    renderCosmetics();
+    return;
+  }
+  cosmeticsLoading = true;
+  renderCosmetics();
+  try {
+    const result = await window.launcher.getCosmetics(account.id);
+    if (selectedAccount()?.id !== account.id) return;
+    cosmeticsProfile = result?.profile || null;
+    cosmeticsAccountId = account.id;
+    if (result?.account) settings.accounts = settings.accounts.map((entry) => entry.id === result.account.id ? result.account : entry);
+  } finally {
+    cosmeticsLoading = false;
+    renderAllAccountUI();
+  }
+}
+
 function renderAllAccountUI() {
   renderTopAccount();
   renderPlayer();
   renderAccounts();
   renderAccountDropdown();
+  renderCosmetics();
   updatePlayState();
   void syncSocialConnection(false);
 }
@@ -1010,6 +1178,9 @@ async function startAddAccount() {
     $('openAuthLinkBtn').classList.add('hidden');
     await window.launcher.addAccount();
     settings = await window.launcher.getSettings();
+    cosmeticsProfile = null;
+    cosmeticsAccountId = null;
+    resetCosmeticsSkinSelection();
     renderAllAccountUI();
     $('authModal').classList.add('hidden');
     showToast(`Signed in as ${selectedAccount()?.name || 'Microsoft account'}.`);
@@ -1506,6 +1677,27 @@ $('soundVolume').addEventListener('change', () => playUiSound('click'));
 $('uiScale').addEventListener('input', () => {
   $('uiScaleValue').textContent = `${$('uiScale').value}%`;
 });
+async function runJavaAction(major, action, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = action === 'repair' ? 'Repairing…' : 'Installing…';
+  try {
+    const result = action === 'repair'
+      ? await window.launcher.repairJava(major)
+      : await window.launcher.installJava(major);
+    playUiSound('success');
+    showToast(`Java ${major} ${action === 'repair' ? 'repaired' : 'installed'} and verified.`);
+    return result;
+  } catch (error) {
+    playUiSound('error');
+    showToast(error.message, 4800);
+    return null;
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 $('chooseJava25Btn').addEventListener('click', async () => {
   const selected = await window.launcher.chooseJava(25);
   if (selected) $('java25Path').value = selected;
@@ -1514,10 +1706,122 @@ $('chooseJava21Btn').addEventListener('click', async () => {
   const selected = await window.launcher.chooseJava(21);
   if (selected) $('java21Path').value = selected;
 });
+$('installJava25Btn').addEventListener('click', () => runJavaAction(25, 'install', $('installJava25Btn')));
+$('repairJava25Btn').addEventListener('click', () => runJavaAction(25, 'repair', $('repairJava25Btn')));
+$('installJava21Btn').addEventListener('click', () => runJavaAction(21, 'install', $('installJava21Btn')));
+$('repairJava21Btn').addEventListener('click', () => runJavaAction(21, 'repair', $('repairJava21Btn')));
 $('openClientFolderBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });
 $('newsHomeBtn').addEventListener('click', () => showView('home'));
+
+document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((button) => {
+  button.addEventListener('click', () => {
+    skinChangeState.variant = button.dataset.cosmeticSkinVariant === 'slim' ? 'slim' : 'classic';
+    document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
+      const active = item.dataset.cosmeticSkinVariant === skinChangeState.variant;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+  });
+});
+
+$('chooseCosmeticsSkinBtn').addEventListener('click', async () => {
+  const account = selectedAccount();
+  if (!account) return showToast('Select a Minecraft account first.');
+  const button = $('chooseCosmeticsSkinBtn');
+  button.disabled = true;
+  try {
+    const selected = await window.launcher.chooseSkinFile();
+    if (!selected) return;
+    const defaultVariant = String(account.skinVariant || 'classic').toLowerCase() === 'slim' ? 'slim' : 'classic';
+    skinChangeState = { accountId: account.id, filePath: selected.filePath, variant: defaultVariant };
+    $('cosmeticsSkinUploadPreview').src = selected.dataUrl;
+    $('cosmeticsSkinUploadPreview').classList.remove('hidden');
+    $('cosmeticsSkinUploadPlaceholder').classList.add('hidden');
+    $('cosmeticsSkinFileName').textContent = selected.fileName || 'skin.png';
+    $('cosmeticsSkinFileMeta').textContent = `${selected.width} × ${selected.height} PNG`;
+    $('applyCosmeticsSkinBtn').disabled = false;
+    document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
+      const active = item.dataset.cosmeticSkinVariant === defaultVariant;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+  } catch (error) {
+    playUiSound('error');
+    showToast(error.message, 5200);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('applyCosmeticsSkinBtn').addEventListener('click', async () => {
+  const account = selectedAccount();
+  if (!account || !skinChangeState.filePath) return;
+  if (skinChangeState.accountId !== account.id) {
+    resetCosmeticsSkinSelection();
+    return showToast('The selected account changed. Choose the skin again.');
+  }
+  const button = $('applyCosmeticsSkinBtn');
+  button.disabled = true;
+  button.textContent = 'Applying…';
+  try {
+    const result = await window.launcher.applySkin(account.id, skinChangeState.filePath, skinChangeState.variant);
+    if (result?.account) settings.accounts = settings.accounts.map((entry) => entry.id === result.account.id ? result.account : entry);
+    if (result?.profile) cosmeticsProfile = result.profile;
+    cosmeticsAccountId = account.id;
+    resetCosmeticsSkinSelection();
+    renderAllAccountUI();
+    playUiSound('success');
+    showToast('Minecraft skin updated. Restart Minecraft if it is already running.', 4200);
+  } catch (error) {
+    button.disabled = false;
+    playUiSound('error');
+    showToast(error.message, 5200);
+  } finally {
+    button.textContent = 'Apply skin';
+  }
+});
+
+$('disableCapeBtn').addEventListener('click', async () => {
+  const account = selectedAccount();
+  if (!account) return;
+  const button = $('disableCapeBtn');
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = 'Removing…';
+  try {
+    const result = await window.launcher.applyCape(account.id, null);
+    if (result?.account) settings.accounts = settings.accounts.map((entry) => entry.id === result.account.id ? result.account : entry);
+    cosmeticsProfile = result?.profile || cosmeticsProfile;
+    cosmeticsAccountId = account.id;
+    renderAllAccountUI();
+    playUiSound('success');
+    showToast('Cape hidden.');
+  } catch (error) {
+    playUiSound('error');
+    showToast(error.message, 5200);
+  } finally {
+    button.textContent = original;
+    renderCosmetics();
+  }
+});
+
+$('refreshCosmeticsBtn').addEventListener('click', async () => {
+  const button = $('refreshCosmeticsBtn');
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = 'Refreshing…';
+  try {
+    await refreshCosmetics();
+    showToast('Minecraft cosmetics refreshed.');
+  } catch (error) {
+    showToast(error.message, 5200);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+});
 
 const socialStatusBtn = $('socialStatusBtn');
 const socialPresenceMenu = $('socialPresenceMenu');
@@ -1554,7 +1858,9 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('.social-presence-menu-wrap')) setSocialPresenceMenuOpen(false);
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') setSocialPresenceMenuOpen(false);
+  if (event.key === 'Escape') {
+    setSocialPresenceMenuOpen(false);
+  }
 });
 document.querySelectorAll('[data-social-tab]').forEach((button) => {
   button.addEventListener('click', () => setSocialTab(button.dataset.socialTab));
