@@ -17,6 +17,29 @@ function Run-Git {
     }
 }
 
+# Check a remote tag from the cloned checkout, not the extracted ZIP folder.
+# `git ls-remote --exit-code` returns 2 for an absent tag and can throw under
+# Windows PowerShell 5.1 when native command errors are redirected. Without
+# --exit-code, a missing tag is a successful empty result instead.
+function Assert-TagAvailable {
+    param(
+        [Parameter(Mandatory=$true)][string]$CheckoutPath,
+        [Parameter(Mandatory=$true)][string]$ReleaseTag
+    )
+
+    if (-not (Test-Path -LiteralPath (Join-Path $CheckoutPath '.git'))) {
+        throw "The cloned Git working directory is missing: $CheckoutPath"
+    }
+    $RemoteTagRefs = @(& git -C $CheckoutPath ls-remote --refs --tags origin "refs/tags/$ReleaseTag")
+    $Status = $LASTEXITCODE
+    if ($Status -ne 0) {
+        throw "Cannot check GitHub release tag $ReleaseTag (git exit code $Status). No source was pushed."
+    }
+    if ($RemoteTagRefs.Count -gt 0) {
+        throw "$ReleaseTag already exists on GitHub. Bump package.json before releasing again. No source was pushed."
+    }
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw 'Git is not installed. Install Git for Windows from https://git-scm.com/download/win, then run this file again.'
 }
@@ -37,18 +60,21 @@ $Checkout = Join-Path $TempRoot 'repo'
 New-Item -ItemType Directory -Path $TempRoot | Out-Null
 
 try {
-    Write-Host "[1/6] Cloning $RepoName..." -ForegroundColor Cyan
+    Write-Host "[1/8] Cloning $RepoName..." -ForegroundColor Cyan
     Run-Git @('clone', $RepoUrl, $Checkout)
 
-    Write-Host '[2/6] Copying the prepared launcher source...' -ForegroundColor Cyan
+    # Preflight using the newly cloned repository. The extracted source ZIP
+    # deliberately has no .git folder and no `origin` remote.
+    Write-Host "Checking that release tag $Tag is available..." -ForegroundColor Cyan
+    Assert-TagAvailable -CheckoutPath $Checkout -ReleaseTag $Tag
 
-    # Clear the temporary working tree while preserving Git's metadata.
-    # Do NOT use robocopy /MIR here: /MIR can purge the destination-only .git directory.
-    Get-ChildItem -LiteralPath $Checkout -Force | Where-Object { $_.Name -ne '.git' } | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force
-    }
+    Write-Host '[2/8] Copying the prepared launcher source...' -ForegroundColor Cyan
 
-    if (-not (Test-Path (Join-Path $Checkout '.git'))) {
+    # Overlay the prepared launcher source without deleting files that exist
+    # only in the GitHub repository. This keeps earlier tracked progress and
+    # avoids wiping remote-only work when starting from a source ZIP.
+    # Exclude .git/node_modules/output folders; never use robocopy /MIR.
+    if (-not (Test-Path -LiteralPath (Join-Path $Checkout '.git'))) {
         throw 'The temporary Git checkout lost its .git directory before the source copy.'
     }
 
@@ -74,7 +100,7 @@ try {
         if (-not $existingName) { Run-Git @('config', 'user.name', 'NoobIsADev') }
         if (-not $existingEmail) { Run-Git @('config', 'user.email', 'NoobIsADev@users.noreply.github.com') }
 
-        Write-Host '[3/6] Creating the source commit...' -ForegroundColor Cyan
+        Write-Host '[3/8] Creating the source commit...' -ForegroundColor Cyan
         Run-Git @('add', '-A')
         & git diff --cached --quiet
         if ($LASTEXITCODE -eq 0) {
@@ -85,14 +111,13 @@ try {
             throw "git diff --cached --quiet failed with exit code $LASTEXITCODE"
         }
 
-        Write-Host '[4/6] Pushing main...' -ForegroundColor Cyan
+        Write-Host '[4/8] Pushing main...' -ForegroundColor Cyan
         Run-Git @('push', 'origin', 'HEAD:main')
 
-        Write-Host "[5/6] Creating release tag $Tag..." -ForegroundColor Cyan
-        & git ls-remote --exit-code --tags origin "refs/tags/$Tag" *> $null
-        if ($LASTEXITCODE -eq 0) {
-            throw "$Tag already exists on GitHub. Bump package.json to a new version before releasing again."
-        }
+        Write-Host "[5/8] Creating release tag $Tag..." -ForegroundColor Cyan
+        # Recheck immediately before tagging, in case another release was
+        # created while this source was being pushed.
+        Assert-TagAvailable -CheckoutPath $Checkout -ReleaseTag $Tag
 
         Run-Git @('tag', '-a', $Tag, '-m', "SpectorClient $Version")
         Run-Git @('push', 'origin', $Tag)
