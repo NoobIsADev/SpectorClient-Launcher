@@ -1075,6 +1075,13 @@ function createWindow() {
   // If Minecraft is active we also keep the launcher alive in the background so
   // the downloaded update can install the instant the game exits.
   mainWindow.on('close', (event) => {
+    // Keep the renderer/IPC launch request alive until Java has started or the
+    // preparation has failed. Closing either window must never abort launch.
+    if (gameLaunchInProgress && !updateInstallStarting) {
+      event.preventDefault();
+      mainWindow.hide();
+      return;
+    }
     const updaterBusy = updateDownloadInProgress || updateInstallPending;
     if (updaterBusy && !updateInstallStarting) {
       event.preventDefault();
@@ -1172,7 +1179,19 @@ function createLogWindow(theme = 'classic') {
 
   logWindow.loadFile(path.join(__dirname, 'logs.html'));
   logWindow.webContents.once('did-finish-load', () => pushThemeToLogWindow(normalizedTheme));
-  logWindow.once('ready-to-show', () => logWindow?.show());
+  logWindow.once('ready-to-show', () => {
+    if (logWindow && !logWindow.isDestroyed()) logWindow.show();
+  });
+  // Closing the detached Logs window during Java/download/auth preparation
+  // must not destroy its webContents or affect the pending launch IPC request.
+  // Hiding it is indistinguishable from closing it to the user, and the same
+  // window can be reopened using the normal Logs action.
+  logWindow.on('close', (event) => {
+    if (gameLaunchInProgress && !updateInstallStarting) {
+      event.preventDefault();
+      logWindow.hide();
+    }
+  });
   logWindow.on('closed', () => { logWindow = null; });
   logWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -1213,7 +1232,12 @@ function send(channel, payload) {
 
 function sendLogPayload(payload) {
   send('game-log', payload);
-  if (logWindow && !logWindow.isDestroyed()) logWindow.webContents.send('game-log', payload);
+  // A native close can race with log delivery. Logging is best-effort and
+  // must never throw into Minecraft installation/launch work.
+  if (logWindow && !logWindow.isDestroyed() && !logWindow.webContents.isDestroyed()) {
+    try { logWindow.webContents.send('game-log', payload); }
+    catch (error) { console.warn('[Logs] Detached window unavailable:', error.message); }
+  }
 }
 
 function classifyLogLevel(line, type = 'launcher') {
@@ -3914,6 +3938,9 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     return { ok: true };
   } catch (error) {
     gameLaunchInProgress = false;
+    // The user may have closed the launcher while it was preparing Minecraft.
+    // On error, make the launcher visible again so the failure can be fixed.
+    if (!activeGameProcess && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
     if (!activeGameProcess) send('game-state', { state: 'error', text: error.message });
 
     // If an update completed while launch preparation was in progress but the
@@ -4010,5 +4037,6 @@ app.on('window-all-closed', () => {
   // During an update we intentionally destroy the windows before
   // autoUpdater.quitAndInstall(). Do not race that call with app.quit().
   if (updateInstallStarting) return;
+  if (gameLaunchInProgress) return; // Never terminate during Minecraft preparation.
   if (process.platform !== 'darwin') app.quit();
 });

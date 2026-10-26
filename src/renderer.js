@@ -23,7 +23,10 @@ let contentProvider = 'modrinth';
 let toastTimer = null;
 let skinViewer = null;
 let skinLoadSerial = 0;
-let skinChangeState = { accountId: null, filePath: null, variant: 'classic' };
+let skinChangeState = { accountId: null, filePath: null, dataUrl: null, variant: 'classic' };
+let cosmeticsSkinViewer = null;
+let cosmeticsPreviewKey = '';
+let cosmeticsPreviewSerial = 0;
 let cosmeticsProfile = null;
 let cosmeticsAccountId = null;
 let cosmeticsLoading = false;
@@ -716,6 +719,7 @@ function showView(name, options = {}) {
     });
   }
   if (name === 'cosmetics') {
+    renderCosmetics();
     void refreshCosmetics().catch((error) => {
       showToast(`Could not load Skins: ${error.message}`, 4800);
     });
@@ -900,8 +904,107 @@ function renderAccounts() {
   });
 }
 
+// In the Skins page, the large preview switches from the equipped skin to
+// the selected (unsaved) PNG. It never uploads until Apply skin is clicked.
+function syncCosmeticsPreview(account) {
+  if (!account || !$('view-cosmetics')?.classList.contains('active')) return;
+  const pending = Boolean(skinChangeState.filePath && skinChangeState.accountId === account.id);
+  const key = pending
+    ? `${account.id}:pending:${skinChangeState.filePath}:${skinChangeState.variant}`
+    : `${account.id}:current:${account.skinChangedAt || ''}`;
+  if (key === cosmeticsPreviewKey) return;
+  cosmeticsPreviewKey = key;
+  const serial = ++cosmeticsPreviewSerial;
+  const fallback = $('cosmeticsCurrentSkin');
+  const canvas = $('cosmeticsViewerCanvas');
+  if (!canvas || !fallback) return;
+  fallback.classList.remove('hidden');
+  canvas.classList.add('hidden');
+  if (pending) {
+    fallback.src = skinChangeState.dataUrl || skinBodyUrl(account);
+    fallback.alt = 'Selected skin texture (not applied yet)';
+  } else {
+    fallback.src = skinBodyUrl(account);
+    fallback.alt = 'Current Minecraft skin';
+  }
+
+  const lib = globalThis.skinview3d;
+  if (!lib?.SkinViewer) {
+    $('cosmeticsPreviewCaption').textContent = pending
+      ? 'PNG selected · Click Apply skin to save it'
+      : 'Your currently equipped Minecraft skin';
+    return;
+  }
+
+  try {
+    if (!cosmeticsSkinViewer) {
+      cosmeticsSkinViewer = new lib.SkinViewer({ canvas, width: 290, height: 315, alpha: true });
+      cosmeticsSkinViewer.controls.enableRotate = true;
+      cosmeticsSkinViewer.controls.enablePan = false;
+      cosmeticsSkinViewer.controls.enableZoom = false;
+      cosmeticsSkinViewer.zoom = 0.84;
+      cosmeticsSkinViewer.fov = 55;
+      cosmeticsSkinViewer.renderer.setClearColor(0x000000, 0);
+    }
+  } catch (error) {
+    console.warn('Skins: 3D preview unavailable:', error);
+    return;
+  }
+
+  void (async () => {
+    try {
+      const texture = pending ? skinChangeState.dataUrl : await window.launcher.getSkinData(account.id);
+      if (serial !== cosmeticsPreviewSerial || !texture) return;
+      const variant = pending ? skinChangeState.variant : (account.skinVariant || 'classic');
+      await cosmeticsSkinViewer.loadSkin(texture, { model: variant === 'slim' ? 'slim' : 'default' });
+      if (serial !== cosmeticsPreviewSerial || !$('view-cosmetics')?.classList.contains('active')) return;
+      canvas.classList.remove('hidden');
+      fallback.classList.add('hidden');
+      $('cosmeticsPreviewCaption').textContent = pending
+        ? 'Unsaved preview · Drag to rotate'
+        : 'Your currently equipped skin · Drag to rotate';
+    } catch (error) {
+      if (serial !== cosmeticsPreviewSerial) return;
+      console.warn('Skins: showing fallback preview:', error);
+      fallback.classList.remove('hidden');
+      canvas.classList.add('hidden');
+      $('cosmeticsPreviewCaption').textContent = pending
+        ? 'Selected skin texture · Not applied yet'
+        : 'Your currently equipped Minecraft skin';
+    }
+  })();
+}
+
+function updateCosmeticsSkinControls() {
+  const account = selectedAccount();
+  const pending = Boolean(account && skinChangeState.filePath && skinChangeState.accountId === account.id);
+  const isClassic = skinChangeState.variant !== 'slim';
+  document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
+    const active = item.dataset.cosmeticSkinVariant === (isClassic ? 'classic' : 'slim');
+    item.classList.toggle('active', active);
+    item.disabled = !pending;
+    item.setAttribute('aria-checked', active ? 'true' : 'false');
+  });
+  if ($('applyCosmeticsSkinBtn')) $('applyCosmeticsSkinBtn').disabled = !pending;
+  if ($('cancelCosmeticsSkinBtn')) $('cancelCosmeticsSkinBtn').classList.toggle('hidden', !pending);
+  if ($('cosmeticsSkinStatus')) {
+    $('cosmeticsSkinStatus').textContent = pending
+      ? `Ready to apply · ${isClassic ? 'Classic (Steve)' : 'Slim (Alex)'} arms · Nothing has changed yet.`
+      : 'Choose a PNG above to enable Apply skin.';
+    $('cosmeticsSkinStatus').classList.toggle('ready', pending);
+  }
+  if ($('cosmeticsSkinFile')) $('cosmeticsSkinFile').classList.toggle('selected', pending);
+  if ($('cosmeticsPreviewBadge')) {
+    $('cosmeticsPreviewBadge').textContent = pending ? 'UNSAVED PREVIEW' : 'CURRENT SKIN';
+    $('cosmeticsPreviewBadge').classList.toggle('pending', pending);
+  }
+  if ($('cosmeticsPreviewCaption')) $('cosmeticsPreviewCaption').textContent = pending
+    ? 'Unsaved preview · Click Apply skin to save'
+    : 'Your currently equipped Minecraft skin';
+}
+
 function resetCosmeticsSkinSelection() {
-  skinChangeState = { accountId: null, filePath: null, variant: 'classic' };
+  skinChangeState = { accountId: null, filePath: null, dataUrl: null, variant: 'classic' };
   const preview = $('cosmeticsSkinUploadPreview');
   const placeholder = $('cosmeticsSkinUploadPlaceholder');
   if (preview) {
@@ -909,14 +1012,12 @@ function resetCosmeticsSkinSelection() {
     preview.classList.add('hidden');
   }
   if (placeholder) placeholder.classList.remove('hidden');
-  if ($('cosmeticsSkinFileName')) $('cosmeticsSkinFileName').textContent = 'No skin selected';
-  if ($('cosmeticsSkinFileMeta')) $('cosmeticsSkinFileMeta').textContent = 'Choose a Minecraft skin PNG to preview it.';
-  if ($('applyCosmeticsSkinBtn')) $('applyCosmeticsSkinBtn').disabled = true;
-  document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
-    const active = item.dataset.cosmeticSkinVariant === 'classic';
-    item.classList.toggle('active', active);
-    item.setAttribute('aria-checked', active ? 'true' : 'false');
-  });
+  if ($('cosmeticsSkinFileName')) $('cosmeticsSkinFileName').textContent = 'No file selected';
+  if ($('cosmeticsSkinFileMeta')) $('cosmeticsSkinFileMeta').textContent = 'Click here to pick your skin PNG';
+  cosmeticsPreviewKey = '';
+  ++cosmeticsPreviewSerial;
+  updateCosmeticsSkinControls();
+  if (selectedAccount()) syncCosmeticsPreview(selectedAccount());
 }
 
 function capePreviewMarkup(cape, extraClass = '') {
@@ -933,20 +1034,24 @@ function renderCosmetics() {
   if (!account) {
     signedOut.classList.remove('hidden');
     content.classList.add('hidden');
+    ++cosmeticsPreviewSerial;
+    cosmeticsPreviewKey = '';
     return;
   }
+  if (skinChangeState.filePath && skinChangeState.accountId !== account.id) resetCosmeticsSkinSelection();
 
   signedOut.classList.add('hidden');
   content.classList.remove('hidden');
   $('cosmeticsAccountAvatar').src = skinHeadUrl(account, 96);
   $('cosmeticsAccountName').textContent = account.name || 'Minecraft Player';
   $('cosmeticsAccountUuid').textContent = account.uuid || '';
-  $('cosmeticsCurrentSkin').src = skinBodyUrl(account);
-  $('cosmeticsCurrentSkin').alt = `${account.name || 'Player'} Minecraft skin`;
+  updateCosmeticsSkinControls();
+  syncCosmeticsPreview(account);
 
   const activeSkin = cosmeticsProfile?.skins?.find((skin) => String(skin.state || '').toUpperCase() === 'ACTIVE') || cosmeticsProfile?.skins?.[0];
   const variant = String(activeSkin?.variant || account.skinVariant || 'classic').toUpperCase();
-  $('cosmeticsSkinModelBadge').textContent = variant === 'SLIM' ? 'SLIM' : 'CLASSIC';
+  const selectedVariant = skinChangeState.filePath && skinChangeState.accountId === account.id ? skinChangeState.variant.toUpperCase() : null;
+  $('cosmeticsSkinModelBadge').textContent = selectedVariant ? `PREVIEW · ${selectedVariant}` : (variant === 'SLIM' ? 'SLIM · ALEX ARMS' : 'CLASSIC · STEVE ARMS');
 
   const capeGrid = $('capeGrid');
   if (cosmeticsLoading) {
@@ -965,8 +1070,8 @@ function renderCosmetics() {
     summary.innerHTML = `${capePreviewMarkup(activeCape, 'small')}<div><small>ACTIVE CAPE</small><b>${escapeHtml(activeCape.alias || 'Minecraft Cape')}</b><span>Currently visible on your Minecraft Java profile.</span></div>`;
     summary.classList.remove('hidden');
   } else {
-    summary.innerHTML = '';
-    summary.classList.add('hidden');
+    summary.innerHTML = '<div class="cosmetics-no-cape-icon" aria-hidden="true">—</div><div><small>ACTIVE CAPE</small><b>No cape equipped</b><span>Choose one of your owned capes below, if available.</span></div>';
+    summary.classList.remove('hidden');
   }
 
   if (!capes.length) {
@@ -978,8 +1083,8 @@ function renderCosmetics() {
     const active = String(cape.state || '').toUpperCase() === 'ACTIVE';
     return `<button class="cape-card ${active ? 'active' : ''}" type="button" data-cape-id="${escapeHtml(cape.id || '')}" ${active ? 'aria-current="true"' : ''}>
       ${capePreviewMarkup(cape)}
-      <div class="cape-card-copy"><b>${escapeHtml(cape.alias || 'Minecraft Cape')}</b><span>${active ? 'Currently equipped' : 'Owned cape'}</span></div>
-      <em>${active ? 'Using' : 'Use'}</em>
+      <div class="cape-card-copy"><b>${escapeHtml(cape.alias || 'Minecraft Cape')}</b><span>${active ? 'Equipped to this account' : 'Owned · Click to equip'}</span></div>
+      <em>${active ? 'Equipped ✓' : 'Equip cape →'}</em>
     </button>`;
   }).join('');
 
@@ -1224,7 +1329,25 @@ async function refreshModStatuses(projectIds) {
   }
 }
 
+function isBuiltInContentItem(item) {
+  if (activeContentType !== 'mods' || !item) return false;
+  // Use the core-file classification returned by main.js for installed mods.
+  if (item.core || item.builtIn) return true;
+  const source = item.source || contentProvider;
+  const projectId = String(item.projectId || '');
+  const slug = String(item.slug || item.projectSlug || '').toLowerCase();
+  // Fabric API ships with the selected SpectorClient version, even before the
+  // first launch or before a background install finishes.
+  if (slug === 'fabric-api' || (source === 'modrinth' && projectId === 'fabric-api')) return true;
+  // Search results can be cross-referenced with core files in Installed.
+  if (projectId && installedMods.some((mod) => mod.core && mod.projectId === projectId && (mod.source || 'modrinth') === source)) return true;
+  // SpectorClient is managed by the launcher, not the mod browser.
+  if (slug === 'spectorclient' && installedMods.some((mod) => mod.core && /^spectorclient(?:-|\.)/i.test(mod.filename || ''))) return true;
+  return false;
+}
+
 function updateButtonForInstalledMod(mod) {
+  if (isBuiltInContentItem(mod)) return '<span class="core-pill built-in-status">Built-In</span>';
   if (!mod.projectId || (mod.source || 'modrinth') !== contentProvider) return '';
   const status = modStatuses[mod.projectId];
   if (status && !status.error && status.installed && !status.updateAvailable) {
@@ -1252,8 +1375,8 @@ function renderInstalledMods() {
       : `<div class="mod-icon">${escapeHtml((item.title || item.filename).slice(0, 1).toUpperCase())}</div>`;
     const tags = `${item.core ? '<span class="core-pill">CORE</span>' : ''}${item.dependency ? '<span class="dep-pill">DEPENDENCY</span>' : ''}`;
     const detail = [item.versionNumber, item.size ? formatBytes(item.size) : item.directory ? 'Folder' : '', item.filename].filter(Boolean).join(' • ');
-    let actions = item.core ? '<span class="core-pill">REQUIRED</span>' : '';
-    if (!item.core) {
+    let actions = isBuiltInContentItem(item) ? '<span class="core-pill built-in-status">Built-In</span>' : '';
+    if (!isBuiltInContentItem(item)) {
       const update = updateButtonForInstalledMod(item);
       actions = `<div class="installed-mod-actions">${update}<button class="remove-mod-btn" data-filename="${escapeHtml(item.filename)}">Remove</button></div>`;
     }
@@ -1369,9 +1492,10 @@ function renderSearchResults() {
     const key = `${source}:${item.projectId}`;
     const isInstalled = installed.has(key) || (activeContentType === 'mods' && item.slug === 'fabric-api' && hasFabricApi);
     const status = modStatuses[item.projectId];
+    const builtIn = isBuiltInContentItem(item);
     const installedCurrent = Boolean(isInstalled && status?.installedVersionId && status?.latestVersionId && status.installedVersionId === status.latestVersionId);
-    const actionLabel = installedCurrent ? 'Installed' : isInstalled ? 'Update' : 'Install';
-    const actionClass = installedCurrent ? ' is-installed' : isInstalled ? ' is-update' : '';
+    const actionLabel = builtIn ? 'Built-In' : installedCurrent ? 'Installed' : isInstalled ? 'Update' : 'Install';
+    const actionClass = builtIn ? ' is-installed is-built-in' : installedCurrent ? ' is-installed' : isInstalled ? ' is-update' : '';
     const icon = item.iconUrl
       ? `<img class="mod-icon" src="${escapeHtml(item.iconUrl)}" alt="" />`
       : `<div class="mod-icon">${escapeHtml(item.title.slice(0, 1).toUpperCase())}</div>`;
@@ -1385,7 +1509,7 @@ function renderSearchResults() {
             <span class="downloads">↓ ${formatDownloads(item.downloads)} downloads</span>
             <div class="mod-actions">
               <button class="mod-page-btn" data-page-url="${escapeHtml(item.pageUrl || '')}">Page</button>
-              <button class="install-mod-btn${actionClass}" data-project-id="${escapeHtml(item.projectId)}" data-installed="${isInstalled ? 'true' : 'false'}" ${installedCurrent ? 'disabled' : ''}>${actionLabel}</button>
+              <button class="install-mod-btn${actionClass}" data-project-id="${escapeHtml(item.projectId)}" data-installed="${isInstalled ? 'true' : 'false'}" ${builtIn || installedCurrent ? 'disabled' : ''}>${actionLabel}</button>
             </div>
           </div>
         </div>
@@ -1715,14 +1839,30 @@ $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClien
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });
 $('newsHomeBtn').addEventListener('click', () => showView('home'));
 
+$('cosmeticsSignInBtn').addEventListener('click', () => showView('accounts'));
+$('changeCosmeticsAccountBtn').addEventListener('click', () => showView('accounts'));
+$('cosmeticsSkinFile').addEventListener('click', () => {
+  if (!$('chooseCosmeticsSkinBtn').disabled) $('chooseCosmeticsSkinBtn').click();
+});
+$('cosmeticsSkinFile').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    if (!$('chooseCosmeticsSkinBtn').disabled) $('chooseCosmeticsSkinBtn').click();
+  }
+});
+$('cancelCosmeticsSkinBtn').addEventListener('click', () => {
+  resetCosmeticsSkinSelection();
+  renderCosmetics();
+  showToast('Skin preview discarded. Your Minecraft skin was not changed.');
+});
+
 document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((button) => {
   button.addEventListener('click', () => {
+    if (!skinChangeState.filePath) return;
     skinChangeState.variant = button.dataset.cosmeticSkinVariant === 'slim' ? 'slim' : 'classic';
-    document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
-      const active = item.dataset.cosmeticSkinVariant === skinChangeState.variant;
-      item.classList.toggle('active', active);
-      item.setAttribute('aria-checked', active ? 'true' : 'false');
-    });
+    $('cosmeticsSkinModelBadge').textContent = `PREVIEW · ${skinChangeState.variant.toUpperCase()}`;
+    updateCosmeticsSkinControls();
+    syncCosmeticsPreview(selectedAccount());
   });
 });
 
@@ -1731,27 +1871,29 @@ $('chooseCosmeticsSkinBtn').addEventListener('click', async () => {
   if (!account) return showToast('Select a Minecraft account first.');
   const button = $('chooseCosmeticsSkinBtn');
   button.disabled = true;
+  $('cosmeticsSkinFile').setAttribute('aria-busy', 'true');
   try {
     const selected = await window.launcher.chooseSkinFile();
     if (!selected) return;
+    // The native dialog validates the PNG dimensions and format in main.js.
+    if (selectedAccount()?.id !== account.id) return showToast('Account changed. Please select your PNG again.');
     const defaultVariant = String(account.skinVariant || 'classic').toLowerCase() === 'slim' ? 'slim' : 'classic';
-    skinChangeState = { accountId: account.id, filePath: selected.filePath, variant: defaultVariant };
+    skinChangeState = { accountId: account.id, filePath: selected.filePath, dataUrl: selected.dataUrl, variant: defaultVariant };
+    cosmeticsPreviewKey = ''; // Re-selected PNG may have changed while keeping the same path.
     $('cosmeticsSkinUploadPreview').src = selected.dataUrl;
     $('cosmeticsSkinUploadPreview').classList.remove('hidden');
     $('cosmeticsSkinUploadPlaceholder').classList.add('hidden');
     $('cosmeticsSkinFileName').textContent = selected.fileName || 'skin.png';
-    $('cosmeticsSkinFileMeta').textContent = `${selected.width} × ${selected.height} PNG`;
-    $('applyCosmeticsSkinBtn').disabled = false;
-    document.querySelectorAll('[data-cosmetic-skin-variant]').forEach((item) => {
-      const active = item.dataset.cosmeticSkinVariant === defaultVariant;
-      item.classList.toggle('active', active);
-      item.setAttribute('aria-checked', active ? 'true' : 'false');
-    });
+    $('cosmeticsSkinFileMeta').textContent = `${selected.width} × ${selected.height} PNG · Ready to preview`;
+    $('cosmeticsSkinModelBadge').textContent = `PREVIEW · ${defaultVariant.toUpperCase()}`;
+    updateCosmeticsSkinControls();
+    syncCosmeticsPreview(account);
   } catch (error) {
     playUiSound('error');
     showToast(error.message, 5200);
   } finally {
     button.disabled = false;
+    $('cosmeticsSkinFile').removeAttribute('aria-busy');
   }
 });
 
@@ -1765,6 +1907,7 @@ $('applyCosmeticsSkinBtn').addEventListener('click', async () => {
   const button = $('applyCosmeticsSkinBtn');
   button.disabled = true;
   button.textContent = 'Applying…';
+  $('cosmeticsSkinStatus').textContent = 'Uploading your skin to your Minecraft account…';
   try {
     const result = await window.launcher.applySkin(account.id, skinChangeState.filePath, skinChangeState.variant);
     if (result?.account) settings.accounts = settings.accounts.map((entry) => entry.id === result.account.id ? result.account : entry);
@@ -1775,11 +1918,12 @@ $('applyCosmeticsSkinBtn').addEventListener('click', async () => {
     playUiSound('success');
     showToast('Minecraft skin updated. Restart Minecraft if it is already running.', 4200);
   } catch (error) {
-    button.disabled = false;
     playUiSound('error');
     showToast(error.message, 5200);
   } finally {
     button.textContent = 'Apply skin';
+    updateCosmeticsSkinControls();
+    if (selectedAccount()) syncCosmeticsPreview(selectedAccount());
   }
 });
 

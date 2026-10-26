@@ -278,58 +278,88 @@
         <div class="section-head cosmetics-section-head">
           <div>
             <div class="overline">PLAYER APPEARANCE</div>
-            <h2>Skins</h2>
-            <p>Manage the skin and owned Minecraft Java capes for your currently selected Microsoft account.</p>
+            <h2>Skins &amp; Capes</h2>
+            <p>Choose a look for your Minecraft Java account. Preview it here, then apply it to your profile.</p>
           </div>
-          <button id="refreshCosmeticsBtn" class="secondary-btn">Refresh</button>
+          <button id="refreshCosmeticsBtn" class="secondary-btn">Refresh profile</button>
         </div>
 
-        <div id="cosmeticsSignedOut" class="empty-state compact-empty">
-          <div><b>Sign in to customize your player</b><span>Select a Microsoft account first, then come back to Skins.</span></div>
+        <div id="cosmeticsSignedOut" class="empty-state compact-empty cosmetics-signed-out">
+          <div><b>Choose a Minecraft account first</b><span>Sign in with Microsoft or select an account to customize its skin and capes.</span></div>
+          <button id="cosmeticsSignInBtn" class="accent-btn">Go to Accounts</button>
         </div>
 
         <div id="cosmeticsContent" class="cosmetics-layout hidden">
           <div class="cosmetics-account-strip">
             <img id="cosmeticsAccountAvatar" class="account-avatar" alt="" />
-            <div><small>SELECTED ACCOUNT</small><b id="cosmeticsAccountName">Minecraft Player</b><span id="cosmeticsAccountUuid"></span></div>
+            <div class="cosmetics-account-copy"><small>CUSTOMIZING ACCOUNT</small><b id="cosmeticsAccountName">Minecraft Player</b><span id="cosmeticsAccountUuid"></span></div>
+            <button type="button" id="changeCosmeticsAccountBtn" class="secondary-btn cosmetics-change-account">Change account</button>
           </div>
 
-          <section class="cosmetics-card cosmetics-skin-card">
+          <div class="cosmetics-steps" aria-label="How to change your skin">
+            <div class="cosmetics-guide-item"><span class="cosmetics-guide-number">1</span><div><b>Choose a PNG</b><small>Pick a Minecraft skin file</small></div></div>
+            <span class="cosmetics-guide-arrow" aria-hidden="true">›</span>
+            <div class="cosmetics-guide-item"><span class="cosmetics-guide-number">2</span><div><b>Choose a model</b><small>Classic or slim arms</small></div></div>
+            <span class="cosmetics-guide-arrow" aria-hidden="true">›</span>
+            <div class="cosmetics-guide-item"><span class="cosmetics-guide-number">3</span><div><b>Apply skin</b><small>Save to your Minecraft account</small></div></div>
+          </div>
+
+          <section class="cosmetics-card cosmetics-skin-card" aria-labelledby="cosmeticsSkinHeading">
             <div class="cosmetics-card-head">
-              <div><span class="version-card-kicker">MINECRAFT SKIN</span><h3>Your skin</h3><p>Upload a 64×64 or legacy 64×32 PNG and choose the player model.</p></div>
+              <div><span class="version-card-kicker">01 / CHANGE YOUR SKIN</span><h3 id="cosmeticsSkinHeading">Minecraft skin</h3><p>Upload a 64 × 64 or legacy 64 × 32 PNG. Nothing changes in Minecraft until you click Apply skin.</p></div>
               <span id="cosmeticsSkinModelBadge" class="cosmetics-status-badge">CLASSIC</span>
             </div>
             <div class="cosmetics-skin-grid">
               <div class="cosmetics-player-preview">
-                <img id="cosmeticsCurrentSkin" alt="Current Minecraft skin" />
+                <div class="cosmetics-preview-heading"><span id="cosmeticsPreviewBadge" class="cosmetics-preview-badge">CURRENT SKIN</span><small>Drag to rotate</small></div>
+                <div class="cosmetics-preview-stage">
+                  <canvas id="cosmeticsViewerCanvas" class="cosmetics-viewer-canvas hidden" aria-label="Interactive Minecraft skin preview"></canvas>
+                  <img id="cosmeticsCurrentSkin" alt="Current Minecraft skin" />
+                </div>
+                <div id="cosmeticsPreviewCaption" class="cosmetics-preview-caption" aria-live="polite">Your currently equipped skin</div>
               </div>
               <div class="cosmetics-skin-controls">
-                <div id="cosmeticsSkinFile" class="cosmetics-file-box">
-                  <div class="cosmetics-file-preview-wrap">
-                    <img id="cosmeticsSkinUploadPreview" class="skin-upload-preview hidden" alt="Selected Minecraft skin texture" />
-                    <div id="cosmeticsSkinUploadPlaceholder" class="cosmetics-file-placeholder">PNG</div>
+                <div class="cosmetics-control-step">
+                  <div class="cosmetics-control-heading"><span class="cosmetics-control-number">1</span><div><b>Select a skin file</b><small>PNG image · 64 × 64 or 64 × 32 pixels</small></div></div>
+                  <div id="cosmeticsSkinFile" class="cosmetics-file-box" role="button" tabindex="0" aria-label="Browse for a Minecraft skin PNG">
+                    <div class="cosmetics-file-preview-wrap">
+                      <img id="cosmeticsSkinUploadPreview" class="skin-upload-preview hidden" alt="Selected Minecraft skin texture" />
+                      <div id="cosmeticsSkinUploadPlaceholder" class="cosmetics-file-placeholder">PNG</div>
+                    </div>
+                    <div class="skin-upload-meta">
+                      <b id="cosmeticsSkinFileName">No file selected</b>
+                      <span id="cosmeticsSkinFileMeta">Click here to pick your skin PNG</span>
+                      <span class="cosmetics-file-link">Browse files →</span>
+                    </div>
                   </div>
-                  <div class="skin-upload-meta">
-                    <b id="cosmeticsSkinFileName">No skin selected</b>
-                    <span id="cosmeticsSkinFileMeta">Choose a Minecraft skin PNG to preview it.</span>
+                  <button id="chooseCosmeticsSkinBtn" class="secondary-btn cosmetics-browse-btn">Browse PNG files</button>
+                </div>
+
+                <div class="cosmetics-control-step">
+                  <div class="cosmetics-control-heading"><span class="cosmetics-control-number">2</span><div><b>Choose arm style</b><small>Pick the model that matches your skin</small></div></div>
+                  <div class="skin-model-picker" role="radiogroup" aria-label="Skin model">
+                    <button type="button" class="skin-model-option active" data-cosmetic-skin-variant="classic" role="radio" aria-checked="true" disabled><b>Classic (Steve)</b><span>4-pixel wide arms</span></button>
+                    <button type="button" class="skin-model-option" data-cosmetic-skin-variant="slim" role="radio" aria-checked="false" disabled><b>Slim (Alex)</b><span>3-pixel slim arms</span></button>
                   </div>
                 </div>
-                <div class="skin-model-picker" role="radiogroup" aria-label="Skin model">
-                  <button type="button" class="skin-model-option active" data-cosmetic-skin-variant="classic" role="radio" aria-checked="true"><b>Classic</b><span>Wide arms</span></button>
-                  <button type="button" class="skin-model-option" data-cosmetic-skin-variant="slim" role="radio" aria-checked="false"><b>Slim</b><span>Slim arms</span></button>
-                </div>
-                <div class="cosmetics-actions">
-                  <button id="chooseCosmeticsSkinBtn" class="secondary-btn">Choose skin</button>
-                  <button id="applyCosmeticsSkinBtn" class="accent-btn" disabled>Apply skin</button>
+
+                <div class="cosmetics-control-step cosmetics-apply-step">
+                  <div class="cosmetics-control-heading"><span class="cosmetics-control-number">3</span><div><b>Save your skin</b><small>Updates the selected Minecraft Java account</small></div></div>
+                  <div id="cosmeticsSkinStatus" class="cosmetics-action-status" role="status" aria-live="polite">Choose a PNG above to enable Apply skin.</div>
+                  <div class="cosmetics-actions">
+                    <button id="cancelCosmeticsSkinBtn" class="secondary-btn hidden">Discard preview</button>
+                    <button id="applyCosmeticsSkinBtn" class="accent-btn" disabled>Apply skin</button>
+                  </div>
                 </div>
               </div>
             </div>
+            <p class="cosmetics-help-note">Changes are saved to your Minecraft account. If Minecraft is already open, you may need to restart the game to see them.</p>
           </section>
 
-          <section class="cosmetics-card cosmetics-cape-card">
+          <section class="cosmetics-card cosmetics-cape-card" aria-labelledby="cosmeticsCapeHeading">
             <div class="cosmetics-card-head">
-              <div><span class="version-card-kicker">MINECRAFT CAPE</span><h3>Your capes</h3><p>Preview every cape owned by this account and choose which one appears in-game.</p></div>
-              <button id="disableCapeBtn" class="secondary-btn" disabled>No cape</button>
+              <div><span class="version-card-kicker">02 / CHOOSE A CAPE</span><h3 id="cosmeticsCapeHeading">Minecraft capes</h3><p>Only capes already owned by this Minecraft Java account appear here. Click a cape to equip it.</p></div>
+              <button id="disableCapeBtn" class="secondary-btn" disabled>Hide current cape</button>
             </div>
             <div id="activeCapeSummary" class="active-cape-summary hidden"></div>
             <div id="capeGrid" class="cape-grid">

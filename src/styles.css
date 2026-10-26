@@ -2920,3 +2920,174 @@ button.social-person-row:hover { border-color: rgba(var(--accent-rgb), .28); bac
   .cosmetics-player-preview { min-height: 250px; }
   .cosmetics-player-preview img { height: 230px; }
 }
+
+/* v1.6.42 - guided Skins & Capes workflow. Uses the active launcher theme. */
+.cosmetics-signed-out { gap: 14px; padding: 26px; }
+.cosmetics-signed-out b { font-size: 15px; }
+.cosmetics-signed-out span { font-size: 11px; line-height: 1.6; }
+.cosmetics-signed-out .accent-btn { align-self: flex-start; margin-top: 8px; }
+.cosmetics-section-head { margin-bottom: 17px; }
+.cosmetics-account-strip { gap: 13px; padding: 13px 16px; }
+.cosmetics-account-copy { flex: 1; }
+.cosmetics-account-strip .cosmetics-change-account { margin-left: auto; flex: 0 0 auto; white-space: nowrap; }
+.cosmetics-account-strip .cosmetics-account-copy b { font-size: 14px; }
+.cosmetics-account-strip .cosmetics-account-copy small,
+.cosmetics-account-strip .cosmetics-account-copy span { font-size: 10px; }
+.cosmetics-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 17px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--accent-rgb) / .13);
+  background: linear-gradient(100deg, rgb(var(--accent-rgb) / .075), rgb(var(--surface-0-rgb) / .72));
+}
+.cosmetics-guide-item { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.cosmetics-guide-number,
+.cosmetics-control-number {
+  display: grid;
+  place-items: center;
+  flex: 0 0 29px;
+  width: 29px;
+  height: 29px;
+  border-radius: 9px;
+  color: var(--blue-2);
+  background: rgb(var(--accent-rgb) / .12);
+  border: 1px solid rgb(var(--accent-rgb) / .32);
+  font-weight: 900;
+  font-size: 12px;
+}
+.cosmetics-guide-item > div,
+.cosmetics-control-heading > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cosmetics-guide-item b { font-size: 11px; color: var(--theme-text); }
+.cosmetics-guide-item small { font-size: 9px; color: var(--theme-muted); line-height: 1.35; }
+.cosmetics-guide-arrow { color: rgb(var(--accent-rgb) / .65); font-size: 22px; font-weight: 300; }
+.cosmetics-card-head h3 { font-size: 21px; }
+.cosmetics-card-head p { font-size: 10px; line-height: 1.65; }
+.cosmetics-status-badge { font-size: 9px; }
+.cosmetics-skin-grid { grid-template-columns: minmax(220px, .88fr) minmax(300px, 1.12fr); gap: 20px; }
+.cosmetics-player-preview {
+  min-height: 390px;
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(var(--accent-rgb) / .19), transparent 48%),
+    radial-gradient(circle at 50% 80%, rgb(var(--accent-rgb) / .10), transparent 50%),
+    linear-gradient(180deg, rgb(var(--accent-rgb) / .055), rgb(var(--surface-0-rgb) / .54));
+}
+.cosmetics-preview-heading { display: flex; justify-content: space-between; align-items: center; gap: 5px; padding: 15px 15px 0; }
+.cosmetics-preview-heading small { font-size: 9px; color: var(--theme-muted); }
+.cosmetics-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid rgb(var(--accent-rgb) / .29);
+  border-radius: 8px;
+  background: rgb(var(--accent-rgb) / .10);
+  color: var(--blue-2);
+  font-size: 9px;
+  letter-spacing: .65px;
+  font-weight: 850;
+}
+.cosmetics-preview-badge.pending { background: rgb(var(--accent-rgb) / .20); border-color: rgb(var(--accent-rgb) / .48); }
+.cosmetics-preview-stage { position: relative; display: flex; justify-content: center; align-items: center; flex: 1; min-height: 265px; overflow: hidden; }
+.cosmetics-player-preview .cosmetics-preview-stage img {
+  height: 265px;
+  max-height: 100%;
+  max-width: 90%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.cosmetics-viewer-canvas { width: min(100%, 290px); height: 315px; object-fit: contain; cursor: grab; touch-action: none; }
+.cosmetics-viewer-canvas:active { cursor: grabbing; }
+.cosmetics-preview-caption {
+  padding: 13px 9px 15px;
+  font-size: 10px;
+  color: var(--theme-muted);
+  text-align: center;
+  background: linear-gradient(180deg, transparent, rgb(var(--surface-0-rgb) / .22));
+}
+.cosmetics-skin-controls { justify-content: flex-start; gap: 12px; }
+.cosmetics-control-step { padding: 13px; border-radius: 12px; border: 1px solid rgb(var(--accent-rgb) / .12); background: rgb(var(--surface-0-rgb) / .45); }
+.cosmetics-control-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+.cosmetics-control-heading b { font-size: 12px; color: var(--theme-text); }
+.cosmetics-control-heading small { color: var(--theme-muted); font-size: 9px; }
+.cosmetics-control-number { flex-basis: 26px; width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
+.cosmetics-file-box { cursor: pointer; transition: .15s ease; }
+.cosmetics-file-box:hover,
+.cosmetics-file-box:focus-visible { border-color: rgb(var(--accent-rgb) / .7); background: rgb(var(--accent-rgb) / .09); outline: none; }
+.cosmetics-file-box.selected { border-style: solid; border-color: rgb(var(--accent-rgb) / .55); }
+.cosmetics-file-box[aria-busy="true"] { opacity: .55; pointer-events: none; }
+.cosmetics-file-preview-wrap,
+.cosmetics-file-preview-wrap .skin-upload-preview,
+.cosmetics-file-placeholder { width: 64px; height: 64px; }
+.cosmetics-file-preview-wrap { flex-basis: 64px; }
+.cosmetics-file-preview-wrap .skin-upload-preview { border-radius: 7px; background: rgb(var(--accent-rgb) / .08); image-rendering: pixelated; }
+.cosmetics-file-placeholder { font-size: 11px; }
+.cosmetics-file-box .skin-upload-meta b { font-size: 11px; }
+.cosmetics-file-box .skin-upload-meta span { font-size: 9px; }
+.cosmetics-file-box .skin-upload-meta .cosmetics-file-link { color: var(--blue-2); font-size: 10px; font-weight: 800; }
+.cosmetics-browse-btn { width: 100%; margin-top: 9px; }
+.skin-model-picker { margin: 0; gap: 10px; }
+.skin-model-option { padding: 13px 10px; }
+.skin-model-option b { font-size: 11px; }
+.skin-model-option span { font-size: 9px; }
+.skin-model-option:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+.skin-model-option:disabled:hover { border-color: rgb(var(--accent-rgb) / .18); }
+.cosmetics-action-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgb(var(--accent-rgb) / .055);
+  color: var(--theme-muted);
+  border: 1px solid rgb(var(--accent-rgb) / .12);
+  font-size: 10px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.cosmetics-action-status.ready { color: var(--blue-2); background: rgb(var(--accent-rgb) / .11); }
+.cosmetics-actions { margin-top: 0; }
+.cosmetics-actions button { min-height: 38px; font-size: 11px; }
+.cosmetics-actions .accent-btn:disabled { cursor: not-allowed; }
+.cosmetics-help-note { margin: 15px 0 0; padding-top: 13px; border-top: 1px solid rgb(var(--accent-rgb) / .1); font-size: 10px; color: var(--theme-muted); line-height: 1.6; }
+.cosmetics-cape-card .active-cape-summary { margin-top: 0; }
+.cosmetics-no-cape-icon { display: grid; place-items: center; width: 40px; height: 55px; flex: 0 0 40px; color: var(--theme-muted); border: 1px dashed rgb(var(--accent-rgb) / .20); border-radius: 6px; font-size: 22px; }
+.cosmetics-cape-card .active-cape-summary small { font-size: 9px; }
+.cosmetics-cape-card .active-cape-summary b { font-size: 12px; }
+.cosmetics-cape-card .active-cape-summary span { font-size: 9px; line-height: 1.4; }
+.cosmetics-cape-card .cape-card-copy b { font-size: 11px; }
+.cosmetics-cape-card .cape-card-copy span { font-size: 9px; }
+.cosmetics-cape-card .cape-card em { font-size: 9px; }
+.cosmetics-empty-capes { font-size: 10px; padding: 15px; }
+.cosmetics-empty-capes span { font-size: 10px; }
+@media (max-width: 1110px) {
+  .cosmetics-skin-grid { grid-template-columns: 1fr; }
+  .cosmetics-player-preview { min-height: 325px; }
+  .cosmetics-preview-stage { min-height: 245px; }
+  .cosmetics-guide-item small { display: none; }
+}
+@media (max-width: 770px) {
+  .cosmetics-steps { flex-wrap: wrap; }
+  .cosmetics-guide-arrow { display: none; }
+  .cosmetics-guide-item { flex: 1 1 100px; }
+  .cosmetics-account-strip { flex-wrap: wrap; }
+  .cosmetics-change-account { width: 100%; }
+  .cosmetics-section-head { flex-wrap: wrap; }
+}
+
+/* v1.6.43: managed/core mods use a themed, non-clickable Built-In status. */
+.install-mod-btn.is-built-in,
+.install-mod-btn.is-built-in:disabled,
+.built-in-status {
+  color: var(--blue-2) !important;
+  background: rgba(var(--accent-rgb), .12) !important;
+  border: 1px solid rgba(var(--accent-rgb), .25) !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+  cursor: default !important;
+}
