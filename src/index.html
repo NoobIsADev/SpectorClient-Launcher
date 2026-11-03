@@ -6,6 +6,14 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:;" />
   <title>SpectorClient</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="overhaul.css" />
+  <link rel="stylesheet" href="redesign-v1645.css" />
+  <link rel="stylesheet" href="refinements-v1646.css" />
+  <link rel="stylesheet" href="refinements-v1647.css" />
+  <link rel="stylesheet" href="refinements-v1648.css" />
+  <link rel="stylesheet" href="refinements-v1649.css" />
+  <link rel="stylesheet" href="refinements-v1650.css" />
+  <link rel="stylesheet" href="refinements-v1651.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -14,54 +22,42 @@
     <div class="cave-glow glow-a"></div>
     <div class="cave-glow glow-b"></div>
 
+    <!-- v1.6.45 navigation: compact, consistent outlined icons. Skins page is archived, not navigable. -->
     <aside class="icon-rail">
-      <div class="rail-logo" title="SpectorClient"><img class="brand-logo-img" src="assets/spector-logo.png" alt="SpectorClient" /></div>
-
-      <nav class="rail-nav" aria-label="Launcher sections">
-        <button class="rail-btn active" data-view="home" title="Play" aria-label="Play">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2L18.5 12 8 5.4Z"/></svg>
-        </button>
-        <button class="rail-btn" data-view="mods" title="Content" aria-label="Content">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8v3h3v5h-3v2h3v5h-3v3H8v-3H5v-5h3v-2H5V6h3V3Zm2 5v8h4V8h-4Z"/></svg>
-        </button>
-        <button class="rail-btn" data-view="accounts" title="Accounts" aria-label="Accounts">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0H5Z"/></svg>
-        </button>
-        <button class="rail-btn" data-view="cosmetics" title="Skins" aria-label="Skins">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 8.6 5.4 5 4.5 3 9l3 2.2V21h12v-9.8L21 9l-2-4.5-3.6.9L12 2Zm0 3.1 2.7 2.7 2.8-.7.8 1.8-2.3 1.7V18H8v-7.4L5.7 8.9l.8-1.8 2.8.7L12 5.1Z"/></svg>
-        </button>
+      <nav class="rail-nav" aria-label="Launcher navigation">
+        <button type="button" class="rail-btn active" data-view="home" title="Play" aria-label="Play" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 9 6-9 6V6Z"/></svg><span class="rail-label">Play</span></button>
+        <button type="button" class="rail-btn" data-view="versions" title="Versions" aria-label="Versions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="5" rx="1.2"/><rect x="4" y="10" width="16" height="5" rx="1.2"/><rect x="4" y="16.5" width="16" height="4" rx="1.2"/><path d="M7 6h1M7 12.5h1M7 18.5h1"/></svg><span class="rail-label">Versions</span></button>
+        <button type="button" class="rail-btn" data-view="mods" title="Mods" aria-label="Mods"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.7"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.7"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.7"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.7"/></svg><span class="rail-label">Mods</span></button>
+        <button type="button" class="rail-btn" data-view="accounts" title="Accounts" aria-label="Accounts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.8 3-6.3 7-6.3s7 2.5 7 6.3"/></svg><span class="rail-label">Accounts</span></button>
       </nav>
-
       <div class="rail-bottom">
-        <button id="openFolderRailBtn" class="rail-btn" title="Open SpectorClient folder" aria-label="Open client folder">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3V6Zm2 4v6h14v-6H5Z"/></svg>
-        </button>
-        <button class="rail-btn" data-view="settings" title="Settings" aria-label="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10.8 2 2.4 0 .6 2.1c.5.2 1 .4 1.5.7L17.2 4 19 5.8l-.8 1.9c.3.5.5 1 .7 1.5l2.1.6v2.4l-2.1.6c-.2.5-.4 1-.7 1.5l.8 1.9-1.8 1.8-1.9-.8c-.5.3-1 .5-1.5.7l-.6 2.1h-2.4l-.6-2.1a8 8 0 0 1-1.5-.7l-1.9.8L5 16.2l.8-1.9a8 8 0 0 1-.7-1.5L3 12.2V9.8l2.1-.6c.2-.5.4-1 .7-1.5L5 5.8 6.8 4l1.9.8c.5-.3 1-.5 1.5-.7L10.8 2ZM12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
-        </button>
+        <!-- Compatibility control: existing Settings also opens the client folder. -->
+        <button type="button" id="openFolderRailBtn" class="rail-btn rail-file-shortcut" title="Open client folder" aria-label="Open client folder" tabindex="-1" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><span class="rail-label">Files</span></button>
+        <button type="button" class="rail-btn" data-view="settings" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.4 2.5h3.2l.5 2.4c.65.2 1.27.45 1.83.76l2.03-1.35 2.25 2.25-1.35 2.03c.31.56.56 1.18.76 1.83L22 10.9v3.2l-2.38.5a8.4 8.4 0 0 1-.76 1.83l1.35 2.03-2.25 2.25-2.03-1.35c-.56.31-1.18.56-1.83.76L13.6 22h-3.2l-.5-2.38a8.4 8.4 0 0 1-1.83-.76l-2.03 1.35-2.25-2.25 1.35-2.03a8.4 8.4 0 0 1-.76-1.83L2 13.6v-3.2l2.38-.5c.2-.65.45-1.27.76-1.83L3.79 6.04l2.25-2.25 2.03 1.35c.56-.31 1.18-.56 1.83-.76L10.4 2.5Z"/><circle cx="12" cy="12" r="3.2"/></svg><span class="rail-label">Settings</span></button>
       </div>
     </aside>
 
     <header class="topbar drag-region">
-      <div class="client-title">
-        <img class="top-brand-logo" src="assets/spector-logo.png" alt="" />
-        <span class="client-title-main">SPECTOR</span><span class="client-title-accent">CLIENT</span>
+      <div class="chrome-left">
+        <div class="client-title" aria-label="SpectorClient">
+          <span class="client-title-main">Spector</span><span class="client-title-accent">Client</span>
+        </div>
       </div>
-
       <div class="top-actions no-drag">
+        <button type="button" id="friendsPanelToggle" class="friends-panel-toggle" aria-controls="right-rail" aria-expanded="false" aria-label="Open friends and messages" title="Open friends and messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5c0 4.5-3.7 8-8.5 8-1.3 0-2.6-.3-3.6-.8L4 20l1-3.8c-.9-1.3-1.5-2.9-1.5-4.7 0-4.7 3.9-8.5 8.5-8.5s8 3.8 8 8.5Z"/></svg><span>Friends</span></button>
         <div class="account-switch-wrap">
-          <button id="accountSwitcher" class="account-switcher">
+          <button type="button" id="accountSwitcher" class="account-switcher" aria-label="Switch Minecraft account" aria-haspopup="true" aria-expanded="false">
             <span id="topAccountAvatar" class="tiny-avatar placeholder">?</span>
             <span class="account-switch-copy"><small>ACCOUNT</small><b id="topAccountName">Sign in</b></span>
             <span class="chevron">⌄</span>
           </button>
           <div id="accountDropdown" class="account-dropdown hidden"></div>
         </div>
-
-        <div class="window-controls">
-          <button id="minimizeBtn" class="window-btn" title="Minimize">—</button>
-          <button id="maximizeBtn" class="window-btn" title="Maximize">□</button>
-          <button id="closeBtn" class="window-btn close" title="Close">×</button>
+        <!-- Restore Spector's original right-side titlebar controls with refined styling. -->
+        <div class="window-controls no-drag" role="group" aria-label="Window controls">
+          <button type="button" id="minimizeBtn" class="window-btn minimize" title="Minimize" aria-label="Minimize launcher">—</button>
+          <button type="button" id="maximizeBtn" class="window-btn maximize" title="Maximize" aria-label="Maximize launcher">□</button>
+          <button type="button" id="closeBtn" class="window-btn close" title="Close" aria-label="Close launcher">×</button>
         </div>
       </div>
     </header>
@@ -69,11 +65,10 @@
     <main class="workspace">
       <section id="view-home" class="view home-view active">
         <div class="home-stage">
-          <div class="player-heading">
-            <div class="overline">SIGNED IN AS</div>
-            <h1 id="homeAccountName">No account selected</h1>
-          </div>
-
+          <!-- Account/version state hooks remain for the renderer, but no
+               duplicate branding or account heading appears over the player. -->
+          <span id="homeAccountName" hidden aria-hidden="true"></span>
+          <span id="homeFeaturedVersion" hidden aria-hidden="true"></span>
           <div class="skin-display">
             <div class="skin-scene-background" aria-hidden="true"></div>
             <div class="skin-halo"></div>
@@ -90,174 +85,93 @@
 
           <div class="launch-zone">
             <div class="play-cluster">
-              <button id="playBtn" class="play-main" disabled>
-                <span class="play-icon">▶</span>
-                <span><b>PLAY</b><small id="playSubtext">Sign in with Microsoft first</small></span>
-              </button>
-              <button id="versionBtn" class="version-button" title="Choose SpectorClient version">
-                <small>VERSION</small><b id="selectedVersionLabel">26.2</b><span>FABRIC</span>
-              </button>
+              <button id="playBtn" class="play-main" disabled><span class="play-icon">▶</span><span><b>PLAY</b><small id="playSubtext">Sign in with Microsoft first</small></span></button>
+              <button id="versionBtn" class="version-button" title="Choose SpectorClient version"><small>VERSION</small><b id="selectedVersionLabel">26.2</b></button>
             </div>
             <div id="status" class="launch-status">Ready.</div>
           </div>
         </div>
       </section>
 
-      <section id="view-versions" class="view scroll-view">
-        <div class="section-head">
-          <div>
-            <div class="overline">CLIENT VERSION</div>
-            <h2>Select SpectorClient</h2>
-            <p>Choose which Minecraft version SpectorClient should launch. Each version keeps its mods separate.</p>
-          </div>
-          <button id="versionBackBtn" class="secondary-btn">Back</button>
+      <section id="view-versions" class="view scroll-view version-redesign-view">
+        <div class="section-head version-page-head">
+          <div><div class="overline">VERSION MANAGER</div><h2>Choose your version</h2><p>Three dedicated Minecraft instances. Your mods and settings stay organized by version.</p></div>
+          <button id="versionBackBtn" class="secondary-btn" type="button">Back to Play</button>
         </div>
-
+        <div class="version-featured-row">
+          <div class="version-featured-logo"><img src="assets/spector-logo.png" alt="" /></div>
+          <div class="version-featured-copy"><span class="version-featured-eyebrow">ACTIVE VERSION</span><b id="versionActiveName">SpectorClient 26.2</b><small>Ready to launch · Fabric client</small></div>
+          <span class="version-featured-status"><span></span>SELECTED</span>
+        </div>
+        <div class="version-list-heading"><h3>Available releases</h3><span>Use a version or open its Content library</span></div>
         <div class="version-select-grid">
-          <article class="client-version-card" data-game-version="26.2">
-            <div class="client-version-icon">26</div>
-            <div class="client-version-copy">
-              <span class="version-card-kicker">SPECTORCLIENT</span>
-              <h3>26.2</h3>
-              <p>Fabric • Migrated dedicated instance</p>
-              <code id="versionModsPath26">SpectorClient data/instances/26.2/mods</code>
-            </div>
-            <div class="client-version-actions">
-              <button class="version-action-btn version-use-btn" type="button" data-version-use="26.2">Use</button>
-              <button class="version-action-btn" type="button" data-version-content="26.2">Content</button>
-            </div>
-          </article>
-
           <article class="client-version-card" data-game-version="26.3">
-            <div class="client-version-icon">26</div>
-            <div class="client-version-copy">
-              <span class="version-card-kicker">SPECTORCLIENT</span>
-              <h3>26.3</h3>
-              <p>Fabric • Dedicated instance and mods</p>
-              <code id="versionModsPath263">SpectorClient data/instances/26.3/mods</code>
-            </div>
-            <div class="client-version-actions">
-              <button class="version-action-btn version-use-btn" type="button" data-version-use="26.3">Use</button>
-              <button class="version-action-btn" type="button" data-version-content="26.3">Content</button>
-            </div>
+            <div class="version-tile-top"><div class="client-version-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="5" rx="1.2"/><rect x="4" y="10" width="16" height="5" rx="1.2"/><rect x="4" y="16.5" width="16" height="4" rx="1.2"/><path d="M7 6h1M7 12.5h1M7 18.5h1"/></svg></div><span class="version-tile-tag">NEWEST</span></div>
+            <div class="client-version-copy"><h3>26.3</h3></div>
+            <div class="client-version-actions"><button class="version-action-btn version-use-btn" type="button" data-version-use="26.3">Use version</button><button class="version-action-btn version-content-btn" type="button" data-version-content="26.3">Manage mods</button></div>
           </article>
-
+          <article class="client-version-card" data-game-version="26.2">
+            <div class="version-tile-top"><div class="client-version-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="5" rx="1.2"/><rect x="4" y="10" width="16" height="5" rx="1.2"/><rect x="4" y="16.5" width="16" height="4" rx="1.2"/><path d="M7 6h1M7 12.5h1M7 18.5h1"/></svg></div><span class="version-tile-tag">SUPPORTED</span></div>
+            <div class="client-version-copy"><h3>26.2</h3></div>
+            <div class="client-version-actions"><button class="version-action-btn version-use-btn" type="button" data-version-use="26.2">Use version</button><button class="version-action-btn version-content-btn" type="button" data-version-content="26.2">Manage mods</button></div>
+          </article>
           <article class="client-version-card" data-game-version="1.21.11">
-            <div class="client-version-icon">1.21</div>
-            <div class="client-version-copy">
-              <span class="version-card-kicker">SPECTORCLIENT</span>
-              <h3>1.21.11</h3>
-              <p>Fabric • Dedicated instance and mods</p>
-              <code id="versionModsPath12111">SpectorClient data/instances/1.21.11/mods</code>
-            </div>
-            <div class="client-version-actions">
-              <button class="version-action-btn version-use-btn" type="button" data-version-use="1.21.11">Use</button>
-              <button class="version-action-btn" type="button" data-version-content="1.21.11">Content</button>
-            </div>
+            <div class="version-tile-top"><div class="client-version-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3.5" width="16" height="5" rx="1.2"/><rect x="4" y="10" width="16" height="5" rx="1.2"/><rect x="4" y="16.5" width="16" height="4" rx="1.2"/><path d="M7 6h1M7 12.5h1M7 18.5h1"/></svg></div><span class="version-tile-tag">LEGACY</span></div>
+            <div class="client-version-copy"><h3>1.21.11</h3></div>
+            <div class="client-version-actions"><button class="version-action-btn version-use-btn" type="button" data-version-use="1.21.11">Use version</button><button class="version-action-btn version-content-btn" type="button" data-version-content="1.21.11">Manage mods</button></div>
           </article>
         </div>
       </section>
 
-      <section id="view-mods" class="view scroll-view">
-        <div class="section-head content-section-head">
-          <div>
-            <div class="overline">CONTENT MANAGER</div>
-            <div id="contentTypePicker" class="content-type-picker">
-              <button id="contentTypeButton" class="content-type-button" type="button" aria-haspopup="listbox" aria-expanded="false">
-                <span id="contentTypeLabel">Mods</span>
-                <svg class="content-type-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 7.5 5 5 5-5"/></svg>
-              </button>
-              <div id="contentTypeMenu" class="content-type-menu hidden" role="listbox" aria-label="Content type">
-                <button class="content-type-option active" type="button" data-content-type-option="mods" role="option" aria-selected="true">
-                  <span class="content-type-option-icon">M</span>
-                  <span class="content-type-option-copy"><b>Mods</b><small>Version-specific Fabric mods</small></span>
-                  <span class="content-type-option-check">✓</span>
-                </button>
-                <button class="content-type-option" type="button" data-content-type-option="resourcepacks" role="option" aria-selected="false">
-                  <span class="content-type-option-icon">R</span>
-                  <span class="content-type-option-copy"><b>Resource Packs</b><small>Shared across every client version</small></span>
-                  <span class="content-type-option-check">✓</span>
-                </button>
-                <button class="content-type-option" type="button" data-content-type-option="shaders" role="option" aria-selected="false">
-                  <span class="content-type-option-icon">S</span>
-                  <span class="content-type-option-copy"><b>Shaders</b><small>Shared across every client version</small></span>
-                  <span class="content-type-option-check">✓</span>
-                </button>
-              </div>
-            </div>
-            <p id="modsDescription">Manage compatible Minecraft content from Modrinth or CurseForge.</p>
-          </div>
-          <button id="openModsFolderBtn" class="secondary-btn" disabled>Open mods folder</button>
+      <section id="view-mods" class="view scroll-view content-redesign-view">
+        <div class="section-head content-page-head">
+          <div><div class="overline">CONTENT LIBRARY</div><h2>Mods & content</h2><p id="modsDescription">Discover, install and manage mods, resource packs, and shaders.</p></div>
+          <button id="openModsFolderBtn" class="secondary-btn" disabled type="button">Open mods folder</button>
         </div>
-
+        <div class="content-quick-nav" role="tablist" aria-label="Content category">
+          <button type="button" class="content-quick-tab active" data-content-type-shortcut="mods" role="tab" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.7"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.7"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.7"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.7"/></svg><span>Mods</span></button>
+          <button type="button" class="content-quick-tab" data-content-type-shortcut="resourcepacks" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m4 16 5-5 4 4 3-3 4 4"/></svg><span>Resource Packs</span></button>
+          <button type="button" class="content-quick-tab" data-content-type-shortcut="shaders" role="tab" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 12s3.4-6.5 9-6.5 9 6.5 9 6.5-3.4 6.5-9 6.5S3 12 3 12Z"/><circle cx="12" cy="12" r="2.5"/></svg><span>Shaders</span></button>
+        </div>
+        <!-- Retain the original picker IDs for account settings and backend compatibility. -->
+        <div id="contentTypePicker" class="content-type-picker content-type-compat">
+          <button id="contentTypeButton" class="content-type-button" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="contentTypeLabel">Mods</span></button>
+          <div id="contentTypeMenu" class="content-type-menu hidden" role="listbox" aria-label="Content type">
+            <button class="content-type-option active" type="button" data-content-type-option="mods" role="option" aria-selected="true">Mods</button>
+            <button class="content-type-option" type="button" data-content-type-option="resourcepacks" role="option" aria-selected="false">Resource Packs</button>
+            <button class="content-type-option" type="button" data-content-type-option="shaders" role="option" aria-selected="false">Shaders</button>
+          </div>
+        </div>
         <div id="modVersionChooser" class="mod-version-chooser">
-          <div class="mod-version-heading">
-            <span class="version-card-kicker">CHOOSE VERSION</span>
-            <h3 id="contentVersionQuestion">Which SpectorClient version do you want to browse for?</h3>
-            <p id="contentVersionHint">Content is filtered to the selected Minecraft version.</p>
-          </div>
+          <div class="mod-version-heading"><span class="version-card-kicker">STEP 01 · PICK A VERSION</span><h3 id="contentVersionQuestion">Which SpectorClient version do you want to browse for?</h3><p id="contentVersionHint">Content is filtered to the selected Minecraft version.</p></div>
           <div class="mod-version-grid">
-            <button class="mod-version-card" data-mod-game-version="26.2">
-              <b>SpectorClient 26.2</b>
-              <span id="modChooserPath26">Fabric • SpectorClient data/instances/26.2/mods</span>
-            </button>
-            <button class="mod-version-card" data-mod-game-version="26.3">
-              <b>SpectorClient 26.3</b>
-              <span id="modChooserPath263">Fabric • SpectorClient data/instances/26.3/mods</span>
-            </button>
-            <button class="mod-version-card" data-mod-game-version="1.21.11">
-              <b>SpectorClient 1.21.11</b>
-              <span id="modChooserPath12111">Fabric • SpectorClient data/instances/1.21.11/mods</span>
-            </button>
+            <button class="mod-version-card" data-mod-game-version="26.3" type="button"><span class="mod-version-symbol">26</span><b>SpectorClient 26.3</b><span id="modChooserPath263">Fabric • Minecraft 26.3</span><span class="mod-version-go">Choose</span></button>
+            <button class="mod-version-card" data-mod-game-version="26.2" type="button"><span class="mod-version-symbol">26</span><b>SpectorClient 26.2</b><span id="modChooserPath26">Fabric • Minecraft 26.2</span><span class="mod-version-go">Choose</span></button>
+            <button class="mod-version-card" data-mod-game-version="1.21.11" type="button"><span class="mod-version-symbol">21</span><b>SpectorClient 1.21.11</b><span id="modChooserPath12111">Fabric • Minecraft 1.21.11</span><span class="mod-version-go">Choose</span></button>
           </div>
         </div>
-
         <div id="modManagerContent" class="hidden">
-          <div class="mod-selected-version-row">
-            <div><small>MANAGING</small><b id="modSelectedVersionLabel">SpectorClient 26.2</b></div>
-            <button id="changeModVersionBtn" class="text-btn">Change version</button>
+          <div class="mod-selected-version-row" aria-label="Version controls">
+            <!-- Keep the existing ID for the version-selection logic; the chosen version is also shown in the Content description. -->
+            <span id="modSelectedVersionLabel" hidden>SpectorClient 26.2</span>
+            <button id="changeModVersionBtn" class="secondary-btn mod-switch-version" type="button">Change version</button>
           </div>
-
-          <div class="mod-tabs" role="tablist" aria-label="Mod manager sections">
-            <button id="installModsTab" class="mod-tab active" data-mod-tab="install" role="tab" aria-selected="true">Install Mods</button>
-            <button id="installedModsTab" class="mod-tab" data-mod-tab="installed" role="tab" aria-selected="false">Installed <span id="installedTabCount">0</span></button>
-          </div>
-          <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
-
-          <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
-            <div class="content-provider-switch" role="tablist" aria-label="Content provider">
-              <button class="content-provider-btn active" data-content-provider="modrinth" role="tab" aria-selected="true">
-                <img src="https://modrinth.com/favicon.ico" alt="" />
-                <span>Modrinth</span>
-              </button>
-              <button class="content-provider-btn" data-content-provider="curseforge" role="tab" aria-selected="false">
-                <img src="https://www.curseforge.com/favicon.ico" alt="" />
-                <span>CurseForge</span>
-              </button>
-            </div>
-            <div class="mods-toolbar">
-              <div class="search-box">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
-                <input id="modSearchInput" maxlength="100" placeholder="Select a version first..." />
-                <button id="modSearchBtn" class="accent-btn">Search</button>
+          <div class="content-manager-grid">
+            <div class="content-manager-main">
+              <div class="mod-tabs" role="tablist" aria-label="Content manager sections"><button id="installModsTab" class="mod-tab active" data-mod-tab="install" type="button" role="tab" aria-selected="true">Discover Mods</button><button id="installedModsTab" class="mod-tab" data-mod-tab="installed" type="button" role="tab" aria-selected="false">Installed <span id="installedTabCount">0</span></button></div>
+              <div id="modManagerStatus" class="manager-status mod-global-status">Ready.</div>
+              <div id="modInstallPanel" class="mod-tab-panel active" data-mod-panel="install">
+                <div class="content-provider-switch" role="tablist" aria-label="Content provider">
+                  <button class="content-provider-btn active" data-content-provider="modrinth" type="button" role="tab" aria-selected="true"><img src="https://modrinth.com/favicon.ico" alt="" /><span>Modrinth</span></button>
+                  <button class="content-provider-btn" data-content-provider="curseforge" type="button" role="tab" aria-selected="false"><img src="https://www.curseforge.com/favicon.ico" alt="" /><span>CurseForge</span></button>
+                </div>
+                <div class="mods-toolbar"><div class="search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg><input id="modSearchInput" maxlength="100" placeholder="Search compatible content..." aria-label="Search content"/><button id="modSearchBtn" class="accent-btn" type="button">Search</button></div></div>
+                <div class="mod-section-title browser-title"><div><h3 id="contentBrowseTitle">Explore Modrinth</h3><span id="modBrowseSubtitle" class="hidden"></span></div></div>
+                <div id="modSearchResults" class="mod-results"><div class="empty-state compact-empty"><b>Select a version</b><span>Choose a version to browse compatible content.</span></div></div>
+                <div id="modPagination" class="mod-pagination hidden" aria-label="Content result pages"></div>
               </div>
+              <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed"><div class="mod-section-title installed-tab-title"><div><h3 id="installedContentTitle">Installed Mods</h3><span id="installedCount">0 mods</span></div><button id="refreshModsBtn" class="text-btn" type="button">Refresh</button></div><div id="installedMods" class="installed-list"></div></div>
             </div>
-
-            <div class="mod-section-title browser-title">
-              <div><h3 id="contentBrowseTitle">Browse Modrinth</h3><span id="modBrowseSubtitle" class="hidden"></span></div>
-            </div>
-            <div id="modSearchResults" class="mod-results">
-              <div class="empty-state compact-empty"><b>Select a version</b><span>Choose 26.2, 26.3, or 1.21.11 to browse compatible mods.</span></div>
-            </div>
-            <div id="modPagination" class="mod-pagination hidden" aria-label="Content result pages"></div>
-          </div>
-
-          <div id="modInstalledPanel" class="mod-tab-panel" data-mod-panel="installed">
-            <div class="mod-section-title installed-tab-title">
-              <div><h3 id="installedContentTitle">Installed Mods</h3><span id="installedCount">0 mods</span></div>
-              <button id="refreshModsBtn" class="text-btn">Refresh</button>
-            </div>
-            <div id="installedMods" class="installed-list"></div>
           </div>
         </div>
       </section>
@@ -329,7 +243,7 @@
                     <div class="skin-upload-meta">
                       <b id="cosmeticsSkinFileName">No file selected</b>
                       <span id="cosmeticsSkinFileMeta">Click here to pick your skin PNG</span>
-                      <span class="cosmetics-file-link">Browse files →</span>
+                      <span class="cosmetics-file-link">Browse files</span>
                     </div>
                   </div>
                   <button id="chooseCosmeticsSkinBtn" class="secondary-btn cosmetics-browse-btn">Browse PNG files</button>
@@ -496,10 +410,11 @@
       </section>
     </main>
 
-    <aside class="right-rail">
+    <aside class="right-rail" id="right-rail" aria-label="Friends and messages">
       <section class="right-panel friends-panel">
         <div class="right-panel-head">
-          <span>SPECTOR SATELLITE</span>
+          <span>FRIENDS</span>
+          <button type="button" id="socialRailCloseBtn" class="social-rail-close" title="Close friends panel" aria-label="Close friends panel">×</button>
           <div class="social-presence-menu-wrap">
             <button id="socialStatusBtn" class="social-status-button" type="button" aria-haspopup="menu" aria-expanded="false" title="Change Spector Satellite status">
               <span id="socialLiveDot" class="live-dot offline"></span>
@@ -517,7 +432,7 @@
 
         <div id="socialSignedOut" class="friends-content social-empty-state">
           <div class="friend-orb">S</div>
-          <b>Friends & Messages</b>
+          <b>Your friends</b>
           <p>Sign in with your Minecraft account to connect to Spector Satellite.</p>
         </div>
 
@@ -562,6 +477,7 @@
                 <b id="socialChatName">Friend</b>
                 <span id="socialChatPresence">Offline</span>
               </div>
+              <button id="socialChatExpandBtn" type="button" class="social-icon-button expand-chat" title="Expand conversation" aria-label="Expand conversation" aria-pressed="false">⤢</button>
               <button id="socialRemoveFriendBtn" class="social-icon-button danger" title="Remove friend">×</button>
             </div>
             <div id="socialMessages" class="social-messages"></div>
@@ -574,15 +490,9 @@
         </div>
       </section>
 
-      <section class="right-panel news-panel">
-        <div class="right-panel-head"><span>NEWS</span><button id="newsHomeBtn" class="mini-link">HOME</button></div>
-        <div class="news-list">
-          <article><span class="news-tag">CLIENT</span><h3>Multiple client versions</h3><p>Launch SpectorClient 26.2, SpectorClient 26.3, or SpectorClient 1.21.11 with isolated mods.</p></article>
-          <article><span class="news-tag">NEW</span><h3>Version-aware Modrinth</h3><p>Choose a client version before browsing or managing compatible Fabric mods.</p></article>
-          <article><span class="news-tag">FILES</span><h3>Separate instance</h3><p>Your normal <code>.minecraft</code> folder stays untouched.</p></article>
-        </div>
-      </section>
+
     </aside>
+    <div id="socialRailBackdrop" class="social-rail-backdrop hidden" aria-hidden="true"></div>
   </div>
 
   <div id="authModal" class="modal hidden">

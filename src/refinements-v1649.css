@@ -1,0 +1,57 @@
+/*
+ * SpectorClient Launcher v1.6.49 — user-supplied landscape and clean buttons.
+ * The PNG referenced below is copied byte-for-byte from the user's upload.
+ * It is shipped in the app and is never downloaded, cropped, recompressed,
+ * darkened, or processed by the branding script.
+ */
+
+/* Fill the complete Play canvas behind the interactive Minecraft character. */
+#view-home .home-stage::before {
+  background-image: url("assets/home-player-background.png") !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
+  background-position: center center !important;
+  filter: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+}
+/* Only shade the bottom controls gently; leave the screenshot itself intact. */
+#view-home .home-stage::after {
+  background: linear-gradient(to top, rgba(0, 0, 0, .40) 0%, rgba(0,0,0,.09) 19%, transparent 39%) !important;
+}
+
+/* No redundant SpectorClient/current-account block above the model. */
+#view-home .player-heading { display: none !important; }
+#view-home .home-stage {
+  grid-template-rows: minmax(0, 1fr) minmax(94px, 115px) !important;
+}
+#view-home .skin-display {
+  grid-row: 1;
+  min-height: 0;
+  margin: 0;
+  align-self: center;
+  justify-self: center;
+  overflow: visible;
+}
+#view-home .launch-zone {
+  grid-row: 2;
+  min-width: 0;
+  align-self: center;
+}
+/* The landscape and player should be the focus, not animated overlays. */
+#view-home .skin-halo,
+#view-home .crystal,
+#view-home .skin-display::after { display: none !important; }
+#view-home .skin-display .player-skin-viewer,
+#view-home .skin-display .player-skin {
+  filter: drop-shadow(0 14px 19px rgba(0, 0, 0, .52));
+}
+@media (max-height: 700px) {
+  #view-home .home-stage {
+    grid-template-rows: minmax(0, 1fr) minmax(82px, 99px) !important;
+  }
+  #view-home .skin-display .player-skin-viewer {
+    height: min(330px, 100%);
+    max-height: 100%;
+  }
+}

@@ -178,20 +178,26 @@ function ensureSkinViewer() {
   const lib = globalThis.skinview3d;
   if (!canvas || !lib?.SkinViewer) return null;
 
-  skinViewer = new lib.SkinViewer({
-    canvas,
-    width: 320,
-    height: 400,
-    alpha: true
-  });
-  skinViewer.controls.enableRotate = true;
-  skinViewer.controls.enableZoom = false;
-  skinViewer.controls.enablePan = false;
-  skinViewer.zoom = 0.82;
-  skinViewer.fov = 55;
-  skinViewer.autoRotate = false;
-  skinViewer.renderer.setClearColor(0x000000, 0);
-  return skinViewer;
+  try {
+    skinViewer = new lib.SkinViewer({
+      canvas,
+      width: 320,
+      height: 400,
+      alpha: true
+    });
+    skinViewer.controls.enableRotate = true;
+    skinViewer.controls.enableZoom = false;
+    skinViewer.controls.enablePan = false;
+    skinViewer.zoom = 0.82;
+    skinViewer.fov = 55;
+    skinViewer.autoRotate = false;
+    skinViewer.renderer.setClearColor(0x000000, 0);
+    return skinViewer;
+  } catch (error) {
+    console.warn('3D skin preview unavailable; using 2D fallback:', error);
+    skinViewer = null;
+    return null;
+  }
 }
 
 async function loadInteractiveSkin(account) {
@@ -258,6 +264,8 @@ function renderSelectedVersionUI() {
   const gameVersion = selectedGameVersion();
   if ($('selectedVersionLabel')) $('selectedVersionLabel').textContent = gameVersion;
   if ($('settingsSelectedVersion')) $('settingsSelectedVersion').textContent = gameVersion;
+  if ($('versionActiveName')) $('versionActiveName').textContent = `SpectorClient ${gameVersion}`;
+  if ($('homeFeaturedVersion')) $('homeFeaturedVersion').textContent = `MINECRAFT ${gameVersion}`;
   document.querySelectorAll('[data-game-version]').forEach((card) => {
     card.classList.toggle('selected', card.dataset.gameVersion === gameVersion);
   });
@@ -308,12 +316,17 @@ function syncContentUiLabels() {
   const provider = providerName();
   const globalContent = activeContentType !== 'mods';
   if ($('contentTypeLabel')) $('contentTypeLabel').textContent = meta.label;
+  document.querySelectorAll('[data-content-type-shortcut]').forEach((button) => {
+    const active = button.dataset.contentTypeShortcut === activeContentType;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
   document.querySelectorAll('[data-content-type-option]').forEach((button) => {
     const active = button.dataset.contentTypeOption === activeContentType;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  if ($('installModsTab')) $('installModsTab').textContent = `Install ${meta.label}`;
+  if ($('installModsTab')) $('installModsTab').textContent = `Discover ${meta.label}`;
   if ($('installedContentTitle')) $('installedContentTitle').textContent = `Installed ${meta.label}`;
   if ($('contentBrowseTitle')) $('contentBrowseTitle').textContent = `Browse ${provider}`;
   if ($('openModsFolderBtn')) $('openModsFolderBtn').textContent = `Open ${meta.folderName} folder`;
@@ -324,9 +337,10 @@ function syncContentUiLabels() {
     ? `${meta.label} install into one global shared folder. This choice only filters compatible downloads.`
     : 'Mods stay isolated per Minecraft version.';
 
+  // Keep version cards readable: directory paths remain internal to installs/folder actions.
   const chooserText = (version) => globalContent
-    ? `Compatibility filter • Minecraft ${version} • shared ${meta.folderName}`
-    : `Fabric • ${gameVersionDetails(version).modsDirectory || `SpectorClient data/instances/${version}/mods`}`;
+    ? `Minecraft ${version} compatibility`
+    : `Fabric • Minecraft ${version}`;
   if ($('modChooserPath26')) $('modChooserPath26').textContent = chooserText('26.2');
   if ($('modChooserPath263')) $('modChooserPath263').textContent = chooserText('26.3');
   if ($('modChooserPath12111')) $('modChooserPath12111').textContent = chooserText('1.21.11');
@@ -401,7 +415,7 @@ async function selectModsVersion(gameVersion) {
   $('modSelectedVersionLabel').textContent = globalContent
     ? `Global ${meta.label}`
     : (details.label || `SpectorClient ${modsTargetVersion}`);
-  if ($('changeModVersionBtn')) $('changeModVersionBtn').textContent = globalContent ? 'Change compatibility' : 'Change version';
+  if ($('changeModVersionBtn')) $('changeModVersionBtn').textContent = 'Change version';
   $('modsDescription').innerHTML = globalContent
     ? `<b>${escapeHtml(meta.label)}</b> are shared across every SpectorClient version. Compatibility filter: <b>Minecraft ${escapeHtml(modsTargetVersion)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`
     : `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
@@ -697,12 +711,18 @@ async function syncSocialConnection(force = false) {
 
 function showView(name, options = {}) {
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
-  document.querySelectorAll('.rail-btn[data-view]').forEach((button) => button.classList.remove('active'));
+  document.querySelectorAll('.rail-btn[data-view]').forEach((button) => {
+    button.classList.remove('active');
+    button.removeAttribute('aria-current');
+  });
+  // The legacy Minecraft Skins screen is archived in source, not part of the launcher UI.
+  if (name === 'cosmetics') name = 'accounts';
   const view = $(`view-${name}`);
   if (!view) return;
+  closeResponsiveSocialPanel();
   view.classList.add('active');
   const nav = document.querySelector(`.rail-btn[data-view="${name}"]`);
-  if (nav) nav.classList.add('active');
+  if (nav) { nav.classList.add('active'); nav.setAttribute('aria-current', 'page'); }
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
@@ -850,7 +870,6 @@ function renderAccounts() {
       </div>
       <div class="account-actions">
         <button class="secondary-btn select-account" data-id="${escapeHtml(account.id)}">${account.id === settings.selectedAccountId ? 'Selected' : 'Use account'}</button>
-        <button class="secondary-btn open-cosmetics" data-id="${escapeHtml(account.id)}">Skins</button>
         <button class="danger-btn remove-account" data-id="${escapeHtml(account.id)}">Remove</button>
       </div>
     </div>
@@ -1084,7 +1103,7 @@ function renderCosmetics() {
     return `<button class="cape-card ${active ? 'active' : ''}" type="button" data-cape-id="${escapeHtml(cape.id || '')}" ${active ? 'aria-current="true"' : ''}>
       ${capePreviewMarkup(cape)}
       <div class="cape-card-copy"><b>${escapeHtml(cape.alias || 'Minecraft Cape')}</b><span>${active ? 'Equipped to this account' : 'Owned · Click to equip'}</span></div>
-      <em>${active ? 'Equipped ✓' : 'Equip cape →'}</em>
+      <em>${active ? 'Equipped ✓' : 'Equip cape'}</em>
     </button>`;
   }).join('');
 
@@ -1139,10 +1158,11 @@ async function refreshCosmetics() {
 
 function renderAllAccountUI() {
   renderTopAccount();
-  renderPlayer();
+  if ($('homeAccountName')) $('homeAccountName').textContent = selectedAccount()?.name || 'No account selected';
   renderAccounts();
   renderAccountDropdown();
-  renderCosmetics();
+  // Keep the Play-screen character live when accounts change; the old Skins management page stays hidden.
+  void renderPlayer().catch((error) => console.warn('Could not render player preview:', error));
   updatePlayState();
   void syncSocialConnection(false);
 }
@@ -1206,9 +1226,9 @@ function renderPlatformPaths() {
   if ($('versionModsPath26')) $('versionModsPath26').textContent = path26;
   if ($('versionModsPath263')) $('versionModsPath263').textContent = path263;
   if ($('versionModsPath12111')) $('versionModsPath12111').textContent = path12111;
-  if ($('modChooserPath26')) $('modChooserPath26').textContent = `Fabric • ${path26}`;
-  if ($('modChooserPath263')) $('modChooserPath263').textContent = `Fabric • ${path263}`;
-  if ($('modChooserPath12111')) $('modChooserPath12111').textContent = `Fabric • ${path12111}`;
+  if ($('modChooserPath26')) $('modChooserPath26').textContent = 'Fabric • Minecraft 26.2';
+  if ($('modChooserPath263')) $('modChooserPath263').textContent = 'Fabric • Minecraft 26.3';
+  if ($('modChooserPath12111')) $('modChooserPath12111').textContent = 'Fabric • Minecraft 1.21.11';
 }
 
 function collectSettings() {
@@ -1506,7 +1526,7 @@ function renderSearchResults() {
           <div class="mod-card-title-line"><h4>${escapeHtml(item.title)}</h4><span class="mod-card-author">by ${escapeHtml(item.author)}</span></div>
           <p>${escapeHtml(item.description)}</p>
           <div class="mod-card-foot">
-            <span class="downloads">↓ ${formatDownloads(item.downloads)} downloads</span>
+            <span class="downloads">${formatDownloads(item.downloads)} downloads</span>
             <div class="mod-actions">
               <button class="mod-page-btn" data-page-url="${escapeHtml(item.pageUrl || '')}">Page</button>
               <button class="install-mod-btn${actionClass}" data-project-id="${escapeHtml(item.projectId)}" data-installed="${isInstalled ? 'true' : 'false'}" ${builtIn || installedCurrent ? 'disabled' : ''}>${actionLabel}</button>
@@ -1633,6 +1653,32 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('.account-switch-wrap')) $('accountDropdown').classList.add('hidden');
 });
 
+// v1.6.45 — responsive Satellite drawer and optional expanded conversation.
+function closeResponsiveSocialPanel() {
+  document.querySelector('.app-shell')?.classList.remove('social-open');
+  $('friendsPanelToggle')?.setAttribute('aria-expanded', 'false');
+  $('socialRailBackdrop')?.classList.add('hidden');
+}
+function toggleResponsiveSocialPanel(force) {
+  const shell = document.querySelector('.app-shell');
+  if (!shell) return;
+  const next = typeof force === 'boolean' ? force : !shell.classList.contains('social-open');
+  shell.classList.toggle('social-open', next);
+  $('friendsPanelToggle')?.setAttribute('aria-expanded', String(next));
+  $('socialRailBackdrop')?.classList.toggle('hidden', !next);
+}
+$('friendsPanelToggle')?.addEventListener('click', () => toggleResponsiveSocialPanel());
+$('socialRailCloseBtn')?.addEventListener('click', () => closeResponsiveSocialPanel());
+$('socialRailBackdrop')?.addEventListener('click', () => closeResponsiveSocialPanel());
+$('socialChatExpandBtn')?.addEventListener('click', () => {
+  const expanded = document.querySelector('.app-shell')?.classList.toggle('chat-expanded');
+  $('socialChatExpandBtn').setAttribute('aria-pressed', String(Boolean(expanded)));
+  $('socialChatExpandBtn').title = expanded ? 'Restore conversation size' : 'Expand conversation';
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeResponsiveSocialPanel();
+});
+
 // Window controls
 $('minimizeBtn').addEventListener('click', () => window.launcher.windowControl('minimize'));
 $('maximizeBtn').addEventListener('click', () => window.launcher.windowControl('maximize'));
@@ -1723,6 +1769,12 @@ $('contentTypeButton').addEventListener('click', (event) => {
   event.stopPropagation();
   const open = $('contentTypeMenu').classList.contains('hidden');
   setContentTypeMenuOpen(open);
+});
+document.querySelectorAll('[data-content-type-shortcut]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    try { await setActiveContentType(button.dataset.contentTypeShortcut); }
+    catch (error) { showToast(`Could not change content type: ${error.message}`); }
+  });
 });
 document.querySelectorAll('[data-content-type-option]').forEach((button) => {
   button.addEventListener('click', async (event) => {
@@ -1837,7 +1889,6 @@ $('repairJava21Btn').addEventListener('click', () => runJavaAction(21, 'repair',
 $('openClientFolderBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });
-$('newsHomeBtn').addEventListener('click', () => showView('home'));
 
 $('cosmeticsSignInBtn').addEventListener('click', () => showView('accounts'));
 $('changeCosmeticsAccountBtn').addEventListener('click', () => showView('accounts'));

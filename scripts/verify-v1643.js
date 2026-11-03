@@ -9,7 +9,8 @@ const base = path.resolve(__dirname, '..');
 const main = fs.readFileSync(path.join(base, 'src', 'main.js'), 'utf8');
 const renderer = fs.readFileSync(path.join(base, 'src', 'renderer.js'), 'utf8');
 const pkg = require(path.join(base, 'package.json'));
-assert.equal(pkg.version, '1.6.43');
+assert.equal(pkg.version.split('.').slice(0,2).join('.'), '1.6');
+assert(Number(pkg.version.split('.')[2]) >= 43, 'v1.6.43 launch-safety features must remain present');
 function between(source, start, end) {
   const first = source.indexOf(start);
   const last = source.indexOf(end, first + start.length);

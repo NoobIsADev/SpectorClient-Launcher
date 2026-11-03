@@ -1,0 +1,27 @@
+/* SpectorClient v1.6.51 — reduce redundant corner branding and unused spacing.
+   The header wordmark is now text-only; the decorative sidebar-corner
+   logo was removed, without altering any active navigation controls. */
+
+/* Put the SpectorClient wordmark at the old logo position, eliminating
+   the width previously reserved for the inline brand image. */
+.topbar { padding-left: 12px; }
+.chrome-left { gap: 0; min-width: 0; }
+.client-title {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.client-title-main, .client-title-accent { white-space: nowrap; }
+
+/* With the bottom-corner decoration gone, Settings can sit near the
+   bottom of the nav rail rather than floating above an empty logo slot. */
+.icon-rail { padding-bottom: 13px; }
+.rail-bottom { margin-bottom: 0; }
+
+@media (max-width: 850px) {
+  .topbar { padding-left: 10px; }
+}

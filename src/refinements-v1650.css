@@ -1,0 +1,28 @@
+/* SpectorClient Launcher v1.6.50 — standalone Modrinth/CurseForge tabs.
+   Remove ONLY the redundant full-width background behind provider buttons.
+   Keep tab IDs, active states, platform integrations and search behavior intact. */
+#modInstallPanel .content-provider-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 !important;
+  margin: 0 0 15px;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+/* Do not stretch the provider buttons into another full-width bar on narrow screens. */
+#modInstallPanel .content-provider-switch > .content-provider-btn {
+  flex: 0 0 auto;
+  min-width: min(118px, 44vw);
+}
+@media (max-width: 760px) {
+  #modInstallPanel .content-provider-switch { width: fit-content; }
+  #modInstallPanel .content-provider-switch > .content-provider-btn { flex: 0 1 auto; }
+}

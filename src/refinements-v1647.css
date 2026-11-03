@@ -1,0 +1,22 @@
+/*
+ * SpectorClient Launcher v1.6.47 – compact version cards.
+ * Previous visual layers and functional controls remain unchanged.
+ */
+.version-select-grid { align-items: stretch; }
+.client-version-card {
+  min-height: 196px;
+  gap: 12px;
+}
+.client-version-copy { margin: 1px 0 3px; }
+.client-version-copy h3 {
+  margin: 0;
+  font-size: clamp(25px, 2.35vw, 34px);
+  line-height: 1.12;
+}
+.client-version-actions { margin-top: auto; }
+@media (max-width: 990px) {
+  .client-version-card { min-height: 185px; }
+}
+@media (max-width: 850px) {
+  .client-version-card { min-height: 175px; }
+}

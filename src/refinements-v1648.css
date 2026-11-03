@@ -1,0 +1,100 @@
+/*
+ * SpectorClient Launcher v1.6.48 — compact Mods controls and truly centered branding.
+ * Append-only UI layer: existing menu/backend/theme styles remain intact.
+ */
+
+/* The dark featured strip and logo tile are unnecessary: leave clean version copy.
+ * Do not change the active version display or selection handlers. */
+.version-featured-row {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  margin: 2px 0 22px;
+  padding: 6px 0;
+  min-width: 0;
+}
+.version-featured-logo {
+  display: grid;
+  place-items: center;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  padding: 0;
+  width: 57px;
+  height: 57px;
+}
+
+/* Remove the old FABRIC CONTENT indicator and dark version bar. Only one
+ * visible change-version button is left, aligned to the content's right edge. */
+.mod-selected-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 0;
+  min-height: 0;
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none !important;
+}
+.mod-selected-version-row > [hidden],
+.mod-target-indicator { display: none !important; }
+.mod-switch-version {
+  min-height: 35px;
+  min-width: 126px;
+  margin: 0;
+  white-space: nowrap;
+  text-align: center;
+  border: 1px solid #4d7995;
+  border-radius: 8px;
+  background: #243f52;
+  color: #d7efff;
+}
+.mod-switch-version:hover { background: #315673; border-color: #8cd4f8; }
+
+/* All menus reference the same build-time centered PNG; eliminate incidental
+ * padding, flex-shrink and decorative backplates that make it look off-center. */
+.rail-logo {
+  display: grid;
+  place-items: center;
+  padding: 0 !important;
+  overflow: visible;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.rail-logo .brand-logo-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 !important;
+  object-fit: contain;
+  object-position: 50% 50%;
+  flex: none;
+}
+.client-title { display: flex; align-items: center; }
+.client-title .top-brand-logo,
+.hero-brand img,
+.version-featured-logo img {
+  display: block;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  object-fit: contain;
+  object-position: center center;
+  align-self: center;
+}
+.hero-brand { align-items: center; }
+.version-featured-logo img { width: 50px; height: 50px; }
+
+@media (max-width: 680px) {
+  .version-featured-row { gap: 9px; }
+  .version-featured-logo { width: 45px; height: 45px; }
+  .version-featured-logo img { width: 42px; height: 42px; }
+  .mod-switch-version { min-width: 120px; }
+}

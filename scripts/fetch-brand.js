@@ -2,14 +2,18 @@ const https = require('https');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const { PNG } = require('pngjs');
+const { centerVisibleArtwork } = require('./center-logo-artwork');
 const { version: LAUNCHER_VERSION } = require('../package.json');
 
 const BRAND_URL = 'https://i.imgur.com/nP9aVFe.png';
 const PLAYER_BACKGROUND_URL = 'https://i.imgur.com/8fwRz1h.jpeg';
 const ROOT = path.resolve(__dirname, '..');
 const UI_PNG_PATH = path.join(ROOT, 'src', 'assets', 'spector-logo.png');
-const PLAYER_BACKGROUND_PATH = path.join(ROOT, 'src', 'assets', 'player-background.png');
+const PLAYER_BACKGROUND_PATH = path.join(ROOT, 'src', 'assets', 'player-background.png'); // Legacy asset for rollback only.
+const USER_BACKGROUND_PATH = path.join(ROOT, 'src', 'assets', 'home-player-background.png');
+const USER_BACKGROUND_SHA256 = 'ab22566e1d525e4101e741571f208ab632aab96aed2f32a7c28c2f033c7a8793';
 const BUILD_PNG_PATH = path.join(ROOT, 'build', 'icon.png');
 const OLD_ICO_PATH = path.join(ROOT, 'build', 'icon.ico');
 
@@ -101,9 +105,10 @@ async function prepareLogo() {
     if (width < 256 || height < 256) {
       throw new Error(`Logo is ${width}x${height}; Desktop builds need at least 256x256.`);
     }
-    png = zoomPng(png, 1.10);
+    // Preserve the original logo URL and 10% zoom, but center its visible pixels.
+    png = PNG.sync.write(centerVisibleArtwork(PNG.sync.read(zoomPng(png, 1.10))), { colorType: 6 });
     await fsp.writeFile(UI_PNG_PATH, png);
-    process.stdout.write(`SpectorClient logo updated with 10% zoom: ${UI_PNG_PATH}\n`);
+    process.stdout.write(`SpectorClient logo centered with 10% zoom: ${UI_PNG_PATH}\n`);
   } catch (error) {
     if (!fs.existsSync(UI_PNG_PATH)) throw error;
     png = await fsp.readFile(UI_PNG_PATH);
@@ -111,7 +116,10 @@ async function prepareLogo() {
     if (width < 256 || height < 256) {
       throw new Error(`Cached logo is ${width}x${height}; Desktop builds need at least 256x256.`);
     }
-    process.stderr.write(`Logo refresh skipped (${error.message}); using cached copy.\n`);
+    // Also fix a cached logo's off-center transparent padding when offline.
+    png = PNG.sync.write(centerVisibleArtwork(PNG.sync.read(png)), { colorType: 6 });
+    await fsp.writeFile(UI_PNG_PATH, png);
+    process.stderr.write(`Logo refresh skipped (${error.message}); using centered cached copy.\n`);
   }
 
   await fsp.writeFile(BUILD_PNG_PATH, png);
@@ -131,13 +139,23 @@ async function preparePlayerBackground() {
   }
 }
 
+async function verifyBundledUserBackground() {
+  // No transformation or network write: the shipped PNG must be byte-identical.
+  const buffer = await fsp.readFile(USER_BACKGROUND_PATH);
+  const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+  if (hash !== USER_BACKGROUND_SHA256) {
+    throw new Error('The bundled Play background has been changed or corrupted. Re-extract the complete source ZIP.');
+  }
+  process.stdout.write(`Bundled original Play background verified: ${USER_BACKGROUND_PATH}\n`);
+}
+
 (async () => {
   await Promise.all([
     fsp.mkdir(path.dirname(UI_PNG_PATH), { recursive: true }),
     fsp.mkdir(path.dirname(BUILD_PNG_PATH), { recursive: true })
   ]);
 
-  await Promise.all([prepareLogo(), preparePlayerBackground()]);
+  await Promise.all([prepareLogo(), verifyBundledUserBackground()]);
 })().catch((error) => {
   console.error(`Could not prepare SpectorClient assets: ${error.message}`);
   process.exitCode = 1;

@@ -1,0 +1,439 @@
+/*
+ * SpectorClient Launcher v1.6.44 — Reversible visual overhaul.
+ *
+ * Inspired by the supplied compact desktop launcher reference, NOT a clone of
+ * another brand's assets. Functional behavior, accounts, mods, game launch,
+ * versions, Satellite friends and the Microsoft skin editor are preserved.
+ * The original 1.6.43 styles.css remains intact. To revert the visuals,
+ * restore the archived 1.6.43 complete source (see ROLLBACK.md).
+ */
+
+:root {
+  --chrome-bg: #0c0e13;
+  --chrome-card: #13151b;
+  --chrome-card-2: #181b23;
+  --chrome-outline: #2a2e39;
+  --chrome-text: #edf5ff;
+  --chrome-muted: #929ba9;
+  --chrome-blue: #96dcff;
+  --chrome-shadow: 0 12px 34px rgba(0,0,0,.36);
+}
+html, body { background: #080a0e !important; }
+body { color: var(--chrome-text); }
+
+/* Frame: black top bar, compact icon rail, central play canvas, friends. */
+.app-shell {
+  grid-template-columns: 80px minmax(0,1fr) 294px;
+  grid-template-rows: 58px minmax(0,1fr);
+  border: 2px solid #292e38 !important;
+  border-radius: 20px;
+  background: var(--chrome-bg) !important;
+  overflow: hidden;
+  box-shadow: inset 0 1px rgba(255,255,255,.03);
+}
+.app-shell::before { display: none !important; }
+.cave-layer, .cave-glow { display: none !important; }
+.topbar {
+  grid-column: 1 / 4;
+  grid-row: 1;
+  padding: 0 12px 0 13px;
+  background: #111318 !important;
+  border-bottom: 1px solid var(--chrome-outline) !important;
+  backdrop-filter: none;
+}
+.chrome-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.window-controls { display: flex; height: auto; align-items: center; gap: 9px; }
+.window-btn {
+  width: 13px;
+  height: 13px;
+  min-width: 13px;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,.13);
+  border-radius: 50%;
+  color: transparent !important;
+  font-size: 0;
+  box-shadow: inset 0 1px rgba(255,255,255,.12);
+  transition: transform .15s, filter .15s;
+}
+.window-btn.close { background: #ff595c !important; }
+.window-btn.minimize { background: #ffbd47 !important; }
+.window-btn.maximize { background: #27ca69 !important; }
+.window-btn:hover, .window-btn.close:hover {
+  transform: scale(1.14);
+  filter: brightness(1.14);
+}
+.window-btn:focus-visible { outline: 2px solid var(--chrome-blue); outline-offset: 3px; }
+.client-title { padding: 0; gap: 4px; align-items: center; white-space: nowrap; letter-spacing: -.4px; }
+.client-title-main, .client-title-accent {
+  font-size: 18px;
+  font-weight: 760;
+  color: #f1f3f6 !important;
+}
+.client-title-accent { color: var(--chrome-blue) !important; }
+.top-brand-logo { height: 27px; width: 27px; margin-right: 5px; }
+.topbar-version {
+  margin-left: 6px;
+  padding: 3px 6px;
+  background: rgba(255,255,255,.035);
+  border: 1px solid #292d36;
+  border-radius: 5px;
+  color: #798594;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .3px;
+}
+.top-actions { gap: 17px; }
+.topbar-client-label { font-size: 9px; letter-spacing: 1.25px; font-weight: 700; color: #5e6a7b; }
+.account-switcher {
+  min-width: 146px;
+  max-width: 225px;
+  height: 35px;
+  padding: 4px 9px 4px 4px;
+  gap: 7px;
+  border: 1px solid #343947 !important;
+  border-radius: 7px;
+  background: #1b1e26 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.035);
+}
+.account-switcher:hover { border-color: rgba(150,220,255,.52) !important; background: #212634 !important; }
+.account-switch-copy small { font-size: 8px; color: #8b99ab !important; letter-spacing: 1px; }
+.account-switch-copy b { font-size: 10px; color: #eef6ff !important; }
+.account-switcher .chevron { color: #a5b6cd !important; font-size: 13px; }
+.tiny-avatar { height: 27px; width: 27px; border-radius: 5px; border-color: #353f50 !important; }
+.account-dropdown { top: 41px; background: #151920 !important; border: 1px solid #3a4353 !important; }
+
+/* Navigation: compact icon + caption cards similar to the user's reference. */
+.icon-rail {
+  grid-row: 2;
+  grid-column: 1;
+  padding: 17px 7px 13px;
+  border-right: 1px solid #272b35 !important;
+  background: #111319 !important;
+  box-shadow: none;
+}
+.rail-nav, .rail-bottom { gap: 9px; width: 100%; }
+.rail-nav { align-items: center; }
+.rail-bottom { align-items: center; margin-top: auto; }
+.rail-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 65px;
+  height: 62px;
+  padding: 7px 3px;
+  margin: 0 auto;
+  border: 1px solid transparent !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  transition: background .15s, border .15s, transform .15s;
+}
+.rail-btn::before { display: none !important; }
+.rail-btn svg { width: 20px; height: 20px; flex: 0 0 auto; fill: #8c939f !important; filter: none !important; }
+.rail-btn .rail-label { font-size: 9px; font-weight: 650; line-height: 1; color: #9299a5; letter-spacing: -.1px; }
+.rail-btn:hover { background: #20242e !important; border-color: #303747 !important; }
+.rail-btn:hover svg, .rail-btn:hover .rail-label { fill: #c0ebff !important; color: #e1f4ff; }
+.rail-btn.active {
+  background: #222630 !important;
+  border-color: #333e50 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.04);
+}
+.rail-btn.active svg { fill: var(--chrome-blue) !important; }
+.rail-btn.active .rail-label { color: #e3edf8; }
+.rail-file-shortcut { display: none !important; }
+.rail-logo {
+  position: relative;
+  margin: 18px auto 0;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  transform: none !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+.brand-logo-img { padding: 1px; }
+
+/* Working area and non-home views. */
+.workspace {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 0;
+  min-width: 0;
+  background: #0e1015 !important;
+}
+.view { min-height: 0; }
+.scroll-view { padding: 26px clamp(18px, 2.2vw, 32px) 34px; }
+.scroll-view .section-head h2 { font-size: 27px; letter-spacing: -.65px; }
+.scroll-view .section-head p { font-size: 11px; color: #9aa3af !important; }
+.section-head { margin-bottom: 22px; }
+.section-head .overline, .version-card-kicker { letter-spacing: 1.3px; }
+
+/* Main Play page — a framed cinematic canvas, black/charcoal with faint cave art.
+   It deliberately uses the original SpectorClient background and 3D skin code. */
+.home-view { background: #0e1015 !important; padding: 11px; overflow: hidden; }
+.home-stage {
+  height: 100%;
+  width: 100%;
+  grid-template-rows: 116px minmax(0,1fr) 119px;
+  border: 1px solid #303747;
+  border-radius: 15px;
+  overflow: hidden;
+  background: #0c0e14 !important;
+  isolation: isolate;
+  box-shadow: 0 12px 35px rgba(0,0,0,.26);
+}
+.home-stage::before {
+  background-image:
+    linear-gradient(180deg, rgba(5,7,13,.83) 0%, rgba(4,8,13,.38) 33%, rgba(7,10,18,.40) 56%, rgba(6,9,14,.86) 100%),
+    radial-gradient(circle at 50% 55%, rgb(var(--accent-rgb) / .14), transparent 57%),
+    url("assets/player-background.png") !important;
+  background-size: cover !important;
+  background-position: center center !important;
+  filter: saturate(.72) brightness(.78) !important;
+  transform: scale(1.015) !important;
+}
+.home-stage::after {
+  background: linear-gradient(90deg,rgba(5,6,10,.35),transparent 15%,transparent 85%,rgba(5,6,10,.35)),
+              linear-gradient(0deg, rgba(0,0,0,.22), transparent 32%,rgba(0,0,0,.2)) !important;
+}
+.player-heading {
+  width: 100%;
+  align-self: start;
+  padding-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.hero-brand { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.hero-brand img { width: 40px; height: 40px; object-fit: contain; filter: drop-shadow(0 3px 12px rgb(var(--accent-rgb) / .22)); }
+.hero-brand span { font-size: clamp(25px, 2.6vw, 37px); font-weight: 850; letter-spacing: -1.4px; color: #fff; text-shadow: 0 3px 16px #000; }
+.hero-brand b { color: var(--chrome-blue); }
+.hero-identity { display: flex; gap: 8px; align-items: baseline; justify-content: center; flex-wrap: wrap; }
+.hero-identity .overline { color: #9faaba !important; font-size: 8px; letter-spacing: 1.3px; }
+.hero-identity h1 { display: inline; margin: 0; font-size: 11px; font-weight: 760; letter-spacing: .15px; color: #e9f6ff !important; }
+.skin-display {
+  width: min(430px, 85%);
+  height: 100%;
+  min-height: 0;
+  align-self: center;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  overflow: visible;
+}
+.skin-halo { width: 340px; height: 340px; opacity: .75; }
+.crystal { opacity: .40; animation-duration: 6s; }
+.skin-display::after { bottom: 0; }
+.player-skin-viewer {
+  width: min(335px,100%);
+  height: min(410px, 100%);
+  filter: drop-shadow(0 19px 18px rgba(0,0,0,.75));
+}
+.player-skin { max-height: min(380px,100%); }
+.skin-placeholder { background: rgba(10,13,19,.68) !important; border: 1px solid #3d485a !important; }
+.launch-zone { align-self: center; width: min(552px, 86%); margin: 0 auto; z-index: 7; }
+.play-cluster {
+  height: 72px;
+  grid-template-columns: minmax(0,1fr) 116px;
+  gap: 0;
+  border: 2px solid #151923;
+  border-radius: 9px;
+  background: #151820;
+  box-shadow: 0 6px 0 rgba(0,0,0,.25), 0 15px 35px rgba(0,0,0,.45);
+}
+.play-main,
+.play-main:not(.stop-state) {
+  background: linear-gradient(180deg,#b0e9ff,#83d4ff) !important;
+  border: 1px solid #cff3ff !important;
+  border-right: 1px solid #496271 !important;
+  border-radius: 7px 0 0 7px;
+  color: #101922 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.6);
+  text-shadow: none;
+}
+.play-main:not(.stop-state):hover:not(:disabled) { filter: brightness(1.065); }
+.play-main .play-icon { font-size: 23px; line-height: 1; }
+.play-main b { font-size: 19px; letter-spacing: -.4px; color: #111b24; }
+.play-main small { color: #455766; font-size: 10px; opacity: 1; }
+.play-main.stop-state {
+  color: #fff !important;
+  border-color: #ff9aa9 !important;
+  background: linear-gradient(180deg,#ff6e82,#d63250) !important;
+}
+.play-main.stop-state b { color: #fff; }
+.play-main.stop-state small { color: #fff5f6; }
+.play-main:disabled { opacity: .53; filter: grayscale(.35); }
+.version-button {
+  border: 1px solid #343c49 !important;
+  border-radius: 0 7px 7px 0;
+  background: #222630 !important;
+  color: #edf6ff !important;
+}
+.version-button:hover { background: #323947 !important; }
+.version-button small { font-size: 8px; color: #aab6c6 !important; }
+.version-button b { font-size: 17px; color: #eef8ff; }
+.version-button span { font-size: 8px; color: var(--chrome-blue) !important; }
+.launch-status { margin-top: 11px; font-size: 10px; color: #bac6d6 !important; }
+
+/* The screenshot has a dedicated Friends panel and no second News/Quick Play HUD. */
+.right-rail {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+  padding: 11px 10px 11px 1px;
+  border-left: 1px solid #242934 !important;
+  background: #0e1015 !important;
+  backdrop-filter: none;
+}
+.friends-panel {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 15px 12px;
+  border: 1px solid #303747 !important;
+  border-radius: 11px;
+  background: #15171e !important;
+  box-shadow: 0 3px 12px rgba(0,0,0,.2);
+}
+.right-panel-head {
+  min-height: 21px;
+  font-size: 10px;
+  color: #91c6e6 !important;
+  letter-spacing: 1.4px;
+}
+.social-status-button { min-height: 25px; }
+.social-main { height: calc(100% - 31px); margin-top: 9px; grid-template-rows: 52px minmax(0, 1fr); }
+.social-empty-state { height: calc(100% - 34px); }
+.social-self-row { background: #1b1e27 !important; border: 1px solid #2e3441 !important; }
+.social-tabs { grid-template-columns: 1fr 1fr .66fr; gap: 5px; }
+.social-tab { font-size: 9px; border-color: #303643 !important; background: #1c2029 !important; }
+.social-tab.active { border-color: #548db0 !important; background: #2a3340 !important; }
+.social-person-row { padding: 9px 5px; border-bottom-color: #292f3b !important; }
+.social-person-copy b { font-size: 11px; }
+.social-person-copy span { font-size: 9px; }
+.social-avatar { width: 32px; height: 32px; }
+.social-list { padding-top: 9px; }
+.social-send-small,
+.social-mini-btn { background: #303e51 !important; color: #c6edff !important; border: 1px solid #526b80 !important; }
+.news-panel { display: none !important; }
+
+/* Consistent dark cards throughout the other working launcher views. */
+.client-version-card,
+.mod-version-card,
+.mod-version-chooser,
+.mod-selected-version-row,
+.mod-card,
+.installed-mod,
+.account-card,
+.setting-card,
+.theme-option,
+.cosmetics-card,
+.cosmetics-account-strip,
+.cosmetics-control-step,
+.cosmetics-steps,
+.content-type-menu,
+.account-dropdown {
+  background: #171a21 !important;
+  border-color: #323743 !important;
+  box-shadow: none !important;
+}
+.client-version-card:hover,
+.mod-version-card:hover,
+.theme-option:hover,
+.account-card:hover { border-color: rgba(149,218,255,.60) !important; }
+.client-version-card.selected,
+.mod-version-card.selected,
+.theme-option.active,
+.account-card.selected { border-color: rgb(var(--accent-rgb) / .65) !important; }
+.mod-tabs, .mod-tab, .mod-version-grid, .content-provider-switch { border-color: #303644 !important; }
+.search-box, .setting-card input:not([type="checkbox"]):not([type="range"]) {
+  background: #10131a !important;
+  border-color: #343a48 !important;
+}
+.accent-btn {
+  background: #96dcff !important;
+  border: 1px solid #c5efff !important;
+  border-radius: 7px;
+  color: #111b25 !important;
+  font-weight: 850;
+}
+.accent-btn:hover:not(:disabled) { background: #b7e9ff !important; }
+.secondary-btn {
+  background: #262c38 !important;
+  border: 1px solid #434c5e !important;
+  border-radius: 7px;
+  color: #c2eaff !important;
+}
+.secondary-btn:hover:not(:disabled) { background: #343d4b !important; }
+.mod-tab.active, .content-provider-btn.active { background: rgb(var(--accent-rgb) / .13) !important; }
+.mod-tab, .content-provider-btn { border-color: #343a46 !important; }
+.cosmetics-player-preview { background: #11141b !important; border-color: #303845 !important; }
+.client-version-icon { border-radius: 9px; }
+.modal-card { background: #151820 !important; border-color: #3a4857 !important; }
+.toast { background: #1d222e !important; border-color: #4c5d6e !important; }
+:focus-visible { outline-color: #9ddfff; }
+
+@media (max-width: 1170px) {
+  .app-shell { grid-template-columns: 73px minmax(0,1fr) 262px; }
+  .rail-btn { width: 59px; }
+  .right-rail { padding-right: 7px; }
+  .hero-brand span { font-size: 29px; }
+}
+@media (max-width: 1050px) {
+  .app-shell { grid-template-columns: 70px minmax(0,1fr) 237px; }
+  .topbar-client-label { display: none; }
+  .rail-btn { width: 56px; }
+  .play-cluster { grid-template-columns: minmax(0,1fr) 105px; }
+  .play-main b { font-size: 16px; }
+  .hero-brand span { font-size: 27px; }
+}
+@media (max-height: 735px) {
+  .home-stage { grid-template-rows: 93px minmax(0,1fr) 107px; }
+  .player-heading { padding-top: 13px; gap: 3px; }
+  .hero-brand img { width: 32px; height: 32px; }
+  .hero-brand span { font-size: 27px; }
+  .launch-zone { margin-bottom: 0; }
+  .play-cluster { height: 61px; }
+  .player-skin-viewer { height: min(340px,100%); }
+}
+@media (max-height: 615px) {
+  .home-stage { grid-template-rows: 75px minmax(0,1fr) 90px; }
+  .hero-identity .overline { display: none; }
+  .launch-status { margin-top: 5px; }
+  .play-cluster { height: 53px; }
+  .rail-btn { height: 56px; }
+  .rail-nav { gap: 4px; }
+}
+
+/* Improve contrast in the version chooser and keep labels readable in the dark UI. */
+.mod-version-heading h3,
+.mod-version-card b,
+.client-version-card h3,
+.setting-card h3,
+.mod-card h3,
+.account-card h3,
+.cosmetics-card h3,
+.content-type-button,
+.section-head h2 {
+  color: #f0f4fa !important;
+}
+.mod-version-heading p,
+.mod-version-card span,
+.client-version-copy p,
+.setting-card p,
+.mod-card p,
+.theme-option small {
+  color: #a5afbf !important;
+}
+.mod-version-card:focus-visible,
+.rail-btn:focus-visible,
+.version-button:focus-visible,
+.play-main:focus-visible,
+.account-switcher:focus-visible { outline: 2px solid #a4e0ff; outline-offset: 2px; }

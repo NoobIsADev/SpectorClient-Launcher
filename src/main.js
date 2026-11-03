@@ -1040,8 +1040,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 760,
-    minWidth: 1040,
-    minHeight: 650,
+    minWidth: 820,
+    minHeight: 560,
     backgroundColor: '#02070b',
     transparent: false,
     title: PRODUCT_NAME,

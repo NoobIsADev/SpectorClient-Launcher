@@ -1,0 +1,110 @@
+/*
+ * SpectorClient Launcher v1.6.46 -- targeted UI refinements.
+ * Keep v1.6.45 responsiveness, and restore the Play-screen character
+ * without restoring the separate Skins management page.
+ */
+
+/* The entire promotional Your Library sidebar is gone; let the mod lists use that width. */
+.content-manager-grid {
+  display: block;
+  min-width: 0;
+}
+.content-manager-main {
+  width: 100%;
+  min-width: 0;
+}
+.mod-selected-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mod-context-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.mod-switch-version {
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 11px;
+  border: 1px solid #416079;
+  border-radius: 8px;
+  background: #243544;
+  color: #d3edff;
+  cursor: pointer;
+}
+.mod-switch-version:hover { background: #304a60; border-color: #79b7db; }
+
+/* The previous interactive account preview is back on Play. */
+.home-stage {
+  grid-template-rows: 108px minmax(0, 1fr) 115px;
+}
+.skin-display {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  max-width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.player-skin-viewer {
+  display: block;
+  width: min(335px, 90%);
+  height: min(410px, 100%);
+  max-height: 100%;
+  cursor: grab;
+}
+.player-skin-viewer:active { cursor: grabbing; }
+.player-skin-viewer.hidden, .player-skin.hidden { display: none !important; }
+.player-skin {
+  max-width: 90%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.skin-placeholder { max-width: 210px; }
+/* Do not show the old Skins page: only the account character preview was restored. */
+#view-cosmetics { display: none !important; }
+
+/* The version selector still opens Versions; it doesn't need a CHANGE caption. */
+.version-button { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; }
+.version-button b { font-size: 17px; line-height: 1.1; }
+
+/* A crisp standard gear icon, matching the other outlined sidebar icons. */
+.rail-btn[data-view="settings"] svg {
+  width: 23px;
+  height: 23px;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Download-count icon removed from the results template; keep numerical metadata readable. */
+.content-manager-main .downloads { font-variant-numeric: tabular-nums; }
+
+@media (min-width: 1161px) {
+  .content-manager-main .mod-results { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 990px) {
+  .content-manager-grid { display: block; }
+  .content-manager-main { width: 100%; }
+}
+@media (max-width: 850px) {
+  .mod-selected-version-row { gap: 8px; }
+  .mod-target-indicator { display: none; }
+  .home-stage { grid-template-rows: 85px minmax(0, 1fr) 98px; }
+  .skin-display { width: min(360px, 92%); }
+  .play-cluster { height: 69px; }
+}
+@media (max-height: 740px) {
+  .home-stage { grid-template-rows: 77px minmax(0,1fr) 98px; }
+  .player-heading { padding-top: 10px; gap: 3px; }
+  .skin-display { min-height: 0; }
+  .player-skin-viewer { height: min(295px, 100%); }
+  .skin-halo { width: min(270px, 65vw); height: min(270px, 65vw); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .crystal { animation: none !important; }
+}
