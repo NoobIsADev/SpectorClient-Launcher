@@ -10,6 +10,7 @@ const { Authflow } = require('prismarine-auth');
 const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
 const WebSocket = require('ws');
+const { downloadSpectorJar, verifyFabricJar, installVerifiedSpectorJar } = require('./spector-mod-network');
 
 // Keep only one SpectorClient process alive. Multiple launcher processes can
 // keep files in the install directory locked and make an in-place update fail.
@@ -2454,22 +2455,70 @@ async function ensureFabricApi(gameVersion, { silent = false } = {}) {
   }
 }
 
-async function askContinueWithoutSpectorMod(gameVersion, error) {
+async function findInstalledSpectorMod(gameVersion) {
+  const modsDir = getModsDir(gameVersion);
+  for (const filename of [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES]) {
+    const candidate = path.join(modsDir, filename);
+    try {
+      await verifyFabricJar(candidate);
+      return candidate;
+    } catch (error) {
+      // A missing or corrupt local copy must not be offered as a usable mod.
+      if (error?.code !== 'ENOENT') log(`[SpectorClient ${gameVersion}] Ignoring invalid installed mod ${filename}: ${error.message}`, 'warn');
+    }
+  }
+  return null;
+}
+
+async function askAfterSpectorModDownloadFailure(gameVersion, error, cachedPath) {
   const selectedVersion = normalizeGameVersion(gameVersion);
-  log(`[SpectorClient ${selectedVersion}] Mod update failed: ${error?.message || error}`, 'warn');
+  log(`[SpectorClient ${selectedVersion}] Mod download failed after retries: ${error?.message || error}`, 'warn');
+
+  const hasCached = !!cachedPath;
+  const buttons = hasCached
+    ? ['Use installed mod', 'Continue without mod', 'Cancel launch']
+    : ['Continue without mod', 'Cancel launch'];
+  const detail = hasCached
+    ? `The SpectorClient mod server is temporarily unavailable.\n\n${error.message}\n\nYou can use the previously installed mod for Minecraft ${selectedVersion} (it may be outdated), launch without SpectorClient, or cancel. Your installed mod will not be removed unless you explicitly choose to launch without it.`
+    : `The SpectorClient mod server is temporarily unavailable.\n\n${error.message}\n\nNo verified installed mod was found for Minecraft ${selectedVersion}. You can launch without SpectorClient or cancel.`;
 
   const result = await dialog.showMessageBox(mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined, {
     type: 'warning',
-    title: 'WARNING',
-    message: 'WARNING',
-    detail: 'We could not update the SpectorClient mod.\nDo you wanna continue without it?',
-    buttons: ['YES', 'NO'],
-    defaultId: 1,
-    cancelId: 1,
+    title: 'SpectorClient mod unavailable',
+    message: 'Could not download the SpectorClient mod',
+    detail,
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
     noLink: true
   });
+  if (result.response === buttons.length - 1) return 'cancel';
+  if (hasCached && result.response === 0) return 'installed';
+  return 'without';
+}
 
-  return result.response === 0;
+async function moveInstalledSpectorModsToBackup(gameVersion) {
+  // Explicit "Continue without mod" must not permanently delete a previously
+  // installed file. Move it outside the mods folder so Fabric will not load it,
+  // but the user can restore it from launcher-data/mod-backups later.
+  const selectedVersion = normalizeGameVersion(gameVersion);
+  const modsDir = getModsDir(selectedVersion);
+  const backupDir = launcherDataPath('mod-backups', selectedVersion);
+  const moved = [];
+  await fsp.mkdir(backupDir, { recursive: true });
+  try {
+    for (const filename of [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES]) {
+      const source = path.join(modsDir, filename);
+      if (!(await pathExists(source))) continue;
+      const backup = path.join(backupDir, `${Date.now()}-${crypto.randomBytes(5).toString('hex')}-${filename}`);
+      await fsp.rename(source, backup);
+      moved.push({ source, backup });
+      log(`[SpectorClient ${selectedVersion}] Preserved disabled mod at ${backup}`, 'warn');
+    }
+  } catch (error) {
+    for (const item of moved.reverse()) await fsp.rename(item.backup, item.source).catch(() => {});
+    throw error;
+  }
 }
 
 async function ensureSpectorMod(gameVersion) {
@@ -2477,42 +2526,61 @@ async function ensureSpectorMod(gameVersion) {
   const profile = getClientProfile(selectedVersion);
   const modsDir = getModsDir(selectedVersion);
   const destination = path.join(modsDir, SPECTOR_MOD_FILENAME);
-  const stagedDestination = path.join(modsDir, `.spectorclient-${selectedVersion}-${process.pid}-${Date.now()}.jar`);
-  send('install-state', { step: 'SpectorClient', text: `Refreshing SpectorClient ${selectedVersion} mod…`, gameVersion: selectedVersion });
+  send('install-state', {
+    step: 'SpectorClient',
+    text: `Checking the SpectorClient ${selectedVersion} mod server…`,
+    gameVersion: selectedVersion
+  });
 
-  const spectorFiles = [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES];
-
+  let stagedDestination = null;
   try {
-    // Download into a staging filename first so a website/network failure does
-    // not destroy the user's currently installed SpectorClient jar before they
-    // choose whether to continue.
-    await downloadFile(profile.modUrl, stagedDestination, `SpectorClient ${selectedVersion} mod`);
-
-    for (const filename of spectorFiles) {
-      await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
-    }
-    await fsp.rename(stagedDestination, destination);
-    log(`SpectorClient ${selectedVersion} mod refreshed from ${profile.modUrl}`);
+    // Every launch still checks the official version-specific endpoint so an
+    // update is not silently postponed. Transient failures now retry first.
+    const download = await downloadSpectorJar(profile.modUrl, destination, {
+      userAgent: USER_AGENT,
+      attempts: 3,
+      onRetry: ({ attempt, attempts, delayMs, error }) => {
+        log(`[SpectorClient ${selectedVersion}] Download attempt ${attempt}/${attempts} failed (${error.message}); retrying in ${Math.round(delayMs / 100) / 10}s.`, 'warn');
+        send('install-state', {
+          step: 'SpectorClient',
+          text: `Connection interrupted; retrying SpectorClient mod (${attempt + 1}/${attempts})…`,
+          gameVersion: selectedVersion
+        });
+      },
+      onProgress: ({ percent }) => send('install-state', {
+        step: 'SpectorClient',
+        text: `Downloading SpectorClient ${selectedVersion} mod… ${percent}%`,
+        percent,
+        gameVersion: selectedVersion
+      })
+    });
+    stagedDestination = download.path;
+    await installVerifiedSpectorJar(stagedDestination, destination, { legacyFiles: LEGACY_SPECTOR_MOD_FILENAMES });
+    stagedDestination = null;
+    log(`SpectorClient ${selectedVersion} mod verified and updated from ${profile.modUrl} (attempt ${download.attempt}).`);
     return { path: destination, skipped: false };
   } catch (error) {
-    await fsp.rm(stagedDestination, { force: true }).catch(() => {});
-    const continueWithout = await askContinueWithoutSpectorMod(selectedVersion, error);
-    if (!continueWithout) {
-      throw new Error(`SpectorClient ${selectedVersion} launch cancelled because the mod could not be updated.`);
+    // Network and server errors must never wipe the last usable JAR.
+    const cachedPath = await findInstalledSpectorMod(selectedVersion);
+    const decision = await askAfterSpectorModDownloadFailure(selectedVersion, error, cachedPath);
+    if (decision === 'installed' && cachedPath) {
+      log(`[SpectorClient ${selectedVersion}] Using the already installed mod after download failure.`, 'warn');
+      send('install-state', { step: 'SpectorClient', text: `Using the installed SpectorClient ${selectedVersion} mod.`, gameVersion: selectedVersion });
+      return { path: cachedPath, skipped: false, cached: true };
     }
-
-    // YES means genuinely continue without SpectorClient rather than silently
-    // falling back to a potentially stale/incompatible jar.
-    for (const filename of spectorFiles) {
-      await fsp.rm(path.join(modsDir, filename), { force: true }).catch(() => {});
+    if (decision !== 'without') {
+      throw new Error(`SpectorClient ${selectedVersion} launch cancelled because its mod could not be updated.`);
     }
+    await moveInstalledSpectorModsToBackup(selectedVersion);
     send('install-state', {
       step: 'SpectorClient',
       text: `Continuing Minecraft ${selectedVersion} without the SpectorClient mod.`,
       gameVersion: selectedVersion
     });
-    log(`[SpectorClient ${selectedVersion}] User chose YES: continuing without the SpectorClient mod.`, 'warn');
+    log(`[SpectorClient ${selectedVersion}] User chose to continue without the mod; installed copies were backed up.`, 'warn');
     return { path: null, skipped: true };
+  } finally {
+    if (stagedDestination) await fsp.rm(stagedDestination, { force: true }).catch(() => {});
   }
 }
 

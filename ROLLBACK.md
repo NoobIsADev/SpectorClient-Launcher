@@ -44,3 +44,8 @@ The original Modrinth/CurseForge provider buttons and backend files were unchang
 ## v1.6.51 text-only header rollback
 
 An exact complete v1.6.50 source backup is provided separately as `SpectorClient-Launcher-v1.6.50-ROLLBACK-BACKUP.zip`. To restore just the decorative corner images in a later version, copy the `rail-logo` and `top-brand-logo` markup from v1.6.50 `src/index.html` and remove the `refinements-v1651.css` link. Keep any later launcher code changes and assign a new unused version if publishing.
+
+
+## v1.6.52 official mod download resilience
+
+A complete untouched v1.6.51 source ZIP is retained separately. To revert, extract that version in a new directory; do not delete the actual user data in APPDATA/spectorclient. This update touches only main-process SpectorClient download handling, an isolated helper, tests, README, and package version; no UI or saved Minecraft data is migrated.

@@ -1,6 +1,16 @@
-# SpectorClient Launcher v1.6.50
+# SpectorClient Launcher v1.6.52
 
 SpectorClient is an Electron launcher for Minecraft **1.21.11, 26.2 and 26.3**. It retains the Microsoft account system, per-version Fabric content manager, auto-downloaded Java runtimes, Spector Satellite friends/messaging, logs, themes and the existing GitHub publication workflow.
+
+## v1.6.52 — resilient official mod downloads
+
+- Each launch checks the existing version-specific SpectorClient endpoint and retries transient connection, DNS, and HTTP 5xx/429 errors up to three times with short backoff.
+- Downloads are staged, verified as genuine ZIP-format **Fabric JARs** (`fabric.mod.json` required), and installed without deleting the last working mod before the new one is ready.
+- If the site remains unavailable, the launcher explicitly offers **Use installed mod** when a verified per-version copy exists; otherwise it offers Continue without mod / Cancel. The former copy is never silently used without consent.
+- If the user explicitly chooses Continue without mod, old SpectorClient copies are preserved outside the mods directory in `launcher-data/mod-backups/<game version>` rather than destroyed.
+- Download redirects must stay HTTPS. This does not repair server outages: if all attempts fail, the launcher reports the error and preserves the available choices.
+- Run `npm run verify:ui` for the local simulated retry, failure, downloaded-JAR-validation and atomic-update regression tests. The Windows/Linux/macOS launcher builds still bundle the helper under `src/`.
+- The **v1.6.51 full ZIP** is the untouched rollback backup; the source of every previous launcher feature remains present.
 
 ## v1.6.50 — clean Content provider selector
 
@@ -81,7 +91,7 @@ The original logo is downloaded by `scripts/fetch-brand.js` on first setup; the 
 
 ## Publish
 
-After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.50`) and will refuse to reuse an existing GitHub tag.
+After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.52`) and will refuse to reuse an existing GitHub tag.
 
 ## Rollback
 

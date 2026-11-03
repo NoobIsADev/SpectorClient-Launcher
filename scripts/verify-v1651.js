@@ -9,7 +9,7 @@ const pkg = require('../package.json');
 const html = read('src/index.html');
 const css = read('src/refinements-v1651.css');
 const js = read('src/renderer.js');
-assert.equal(pkg.version, '1.6.51', 'Patch version must be bumped exactly once');
+assert(Number(pkg.version.split('.').at(-1)) >= 51, 'v1.6.51 layout must remain in later releases');
 assert(html.includes('<link rel="stylesheet" href="refinements-v1651.css" />'), 'New style layer must be loaded last');
 assert(!/class="(?:top-brand-logo|brand-logo-img|rail-logo)"/.test(html), 'Remove redundant corner images, not the brand name');
 assert(/<div class="client-title" aria-label="SpectorClient">[\s\S]*?<span class="client-title-main">Spector<\/span><span class="client-title-accent">Client<\/span>/.test(html), 'Keep header wordmark readable and text-only');
