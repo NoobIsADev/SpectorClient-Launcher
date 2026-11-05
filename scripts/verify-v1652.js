@@ -56,7 +56,7 @@ function makeFabricJar(name) {
 
 async function run() {
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '1.6.52', 'Launcher patch should advance to v1.6.52');
+  assert(Number(pkg.version.split('.').at(-1)) >= 52, 'v1.6.52 network fix must remain in later releases');
   const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
   assert(main.includes("require('./spector-mod-network')"), 'Launcher must use resilient downloader');
   assert(main.includes('askAfterSpectorModDownloadFailure'), 'Installed-mod fallback prompt must remain');

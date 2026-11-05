@@ -1,6 +1,24 @@
-# SpectorClient Launcher v1.6.52
+# SpectorClient Launcher v1.6.54
 
 SpectorClient is an Electron launcher for Minecraft **1.21.11, 26.2 and 26.3**. It retains the Microsoft account system, per-version Fabric content manager, auto-downloaded Java runtimes, Spector Satellite friends/messaging, logs, themes and the existing GitHub publication workflow.
+
+## v1.6.54 — Final JVM argument placement hardening
+
+- The Play button still launches the **original** Fabric/Minecraft child process, with `-XX:StackShadowPages` guaranteed to be a single JVM flag **before `-cp` and the Java main class** on Minecraft 26.3. The actual game version (`opts.version.number`) determines whether to apply the fix, not the saved profile display name.
+- Validate the classpath/main-class structure before launch, normalize duplicate/low values from both JVM and accidentally misfiled game arguments, and retain higher values and every other launch argument. On failure, abort rather than launch with an unverified command. The Logs window records the resulting JVM flag and its position without exposing credentials or full classpath.
+- Added `scripts/verify-v1654.js` regression tests for real Play-handler logic, duplicate/conflicting flags before/after the main class, saved profiles, Java RAM, player process/exit tracking, and unchanged 26.2/1.21.11 behavior.
+- As before, a full in-game Minecraft 26.3 launch must be confirmed on Windows. Source tests alone cannot guarantee OS/driver stability.
+
+## v1.6.53 — Minecraft 26.3 StackShadowPages (actual Play-button launch path)
+
+- The Play button continues to use Electron `game:launch` and `minecraft-launcher-core` 3.18.2 with the original Java process. **No new Java wrapper or respawn:** Stop, exit codes, playtime and status notifications still track the returned Minecraft child.
+- For actual Minecraft **26.3**, set JVM `-XX:StackShadowPages=32` before the Java main class on the **first launch**. Values below 32, malformed values and duplicates are normalized to one effective setting; a user's higher value (such as 48 or 64) is preserved.
+- The fix is applied twice defensively: `opts.customArgs` (MCLC's JVM option list, *not* `customLaunchArgs`) and the mutable final `arguments` event emitted by MCLC immediately before Java `spawn`. This ensures exactly one effective StackShadowPages option precedes `-cp` and Fabric's `KnotClient` main class, including when saved custom flags conflict.
+- Select the **real Minecraft version** (`opts.version.number`) rather than a Fabric profile identifier or display name. Older saved selected labels such as `SpectorClient 26.3` are recognized as 26.3, so they cannot accidentally fall back to the 26.2 instance.
+- Saved 26.3 JVM arguments and explicitly selected launch profiles, including optional `javaArgs`, `jvmArgs`, `jvmArguments`, `customArgs`, are retained; accidental StackShadowPages options in saved *game* arguments are relocated to the JVM list without removing other game flags. RAM memory settings, other JVM options, Fabric files, mod installation and Quick Play server arguments stay intact.
+- Minecraft **1.21.11 and 26.2** keep their prior launch command behavior, with no StackShadowPages normalization or new defaults applied.
+- `npm run verify:ui` runs every earlier regression suite plus a test that executes the **actual** Play IPC handler using a simulated Fabric/MCLC Java launch and original exit event. The real Minecraft install, Java 25, network and GPU are not required for these source checks.
+- For an immediate rollback, extract the separate untouched `SpectorClient-Launcher-v1.6.52-ROLLBACK-BACKUP.zip`. **Never overwrite the user's APPDATA/spectorclient data or a released GitHub tag.**
 
 ## v1.6.52 — resilient official mod downloads
 
@@ -91,7 +109,7 @@ The original logo is downloaded by `scripts/fetch-brand.js` on first setup; the 
 
 ## Publish
 
-After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.52`) and will refuse to reuse an existing GitHub tag.
+After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.54`) and will refuse to reuse an existing GitHub tag.
 
 ## Rollback
 

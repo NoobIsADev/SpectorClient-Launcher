@@ -11,6 +11,7 @@ const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
 const WebSocket = require('ws');
 const { downloadSpectorJar, verifyFabricJar, installVerifiedSpectorJar } = require('./spector-mod-network');
+const { minecraftVersion, isMinecraft263, getCustomLaunchArguments, normalizeCustomJvmArgs, enforceFinalJvmArguments } = require('./launch-jvm');
 
 // Keep only one SpectorClient process alive. Multiple launcher processes can
 // keep files in the install directory locked and make an in-place update fail.
@@ -130,7 +131,9 @@ const p = (...parts) => path.join(APPDATA_ROOT, ...parts);
 const launcherDataPath = (...parts) => path.join(LAUNCHER_DATA, ...parts);
 
 function normalizeGameVersion(value) {
-  const candidate = String(value || '').trim();
+  // Resolve the real Minecraft version; saved profile display names such as
+  // "SpectorClient 26.3" must not silently fall back to the 26.2 instance.
+  const candidate = minecraftVersion(value);
   return Object.prototype.hasOwnProperty.call(CLIENT_PROFILES, candidate) ? candidate : DEFAULT_GAME_VERSION;
 }
 
@@ -3951,6 +3954,17 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
       customArgs: []
     };
 
+    // MCLC uses customArgs for JVM options (before -cp/main class), whereas
+    // customLaunchArgs are game arguments (after the main class). For 26.3,
+    // restore saved custom/profile flags and normalize StackShadowPages here,
+    // rather than applying a second launch or changing the Java runtime.
+    // Other Minecraft versions keep their existing launch options unchanged.
+    if (isMinecraft263(opts)) {
+      const savedArguments = getCustomLaunchArguments(merged);
+      opts.customArgs = normalizeCustomJvmArgs(savedArguments.jvm, opts.version.number);
+      opts.customLaunchArgs = savedArguments.game;
+    }
+
     opts.javaPath = javaExecutable;
     if (merged.serverAddress?.trim()) {
       opts.quickPlay = { type: 'multiplayer', identifier: merged.serverAddress.trim() };
@@ -3959,7 +3973,33 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     bindLauncherEvents();
     send('game-state', { state: 'launching', text: `Launching SpectorClient ${selectedGameVersion}…`, gameVersion: selectedGameVersion });
 
-    const child = await launcher.launch(opts);
+    // minecraft-launcher-core 3.18.2 emits this mutable argv immediately
+    // before child_process.spawn(java, argv). Normalizing the FINAL JVM
+    // section also catches duplicate/conflicting flags from saved profiles,
+    // Fabric launch preparation and any custom JVM arguments. Mutate this
+    // array in place, do not launch a wrapper process: the returned Minecraft
+    // child is the one used for playtime, Stop, exit codes and notifications.
+    let finalJvmVerified = false;
+    const onJavaArguments = (args) => {
+      const result = enforceFinalJvmArguments(args, opts);
+      if (result.applied) {
+        finalJvmVerified = true;
+        log(`[Java] Verified Minecraft ${opts.version.number} Java argv: -XX:StackShadowPages=${result.pages} occurs exactly once at JVM index ${result.flagIndex}, before main class ${result.mainClass} (index ${result.mainClassIndex})${result.relocatedFromGameArgs ? `; moved ${result.relocatedFromGameArgs} misplaced flag(s) out of game arguments` : ''}.`, 'launcher');
+      }
+    };
+    launcher.on('arguments', onJavaArguments);
+    let child;
+    try {
+      child = await launcher.launch(opts);
+    } finally {
+      launcher.removeListener('arguments', onJavaArguments);
+    }
+    if (isMinecraft263(opts) && !finalJvmVerified) {
+      throw new Error('Minecraft 26.3 could not verify its final JVM arguments. Java launch cancelled.');
+    }
+    if (!child || typeof child.once !== 'function') {
+      throw new Error(`Minecraft ${selectedGameVersion} did not return a running game process.`);
+    }
     activeGameProcess = child;
     activeGameVersion = selectedGameVersion;
     activeGameServerAddress = normalizeSatelliteServerAddress(merged.serverAddress);

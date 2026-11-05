@@ -49,3 +49,12 @@ An exact complete v1.6.50 source backup is provided separately as `SpectorClient
 ## v1.6.52 official mod download resilience
 
 A complete untouched v1.6.51 source ZIP is retained separately. To revert, extract that version in a new directory; do not delete the actual user data in APPDATA/spectorclient. This update touches only main-process SpectorClient download handling, an isolated helper, tests, README, and package version; no UI or saved Minecraft data is migrated.
+
+## v1.6.53 Minecraft 26.3 JVM argument rollback
+
+The exact complete v1.6.52 source (40 files) is backed up separately as `SpectorClient-Launcher-v1.6.52-ROLLBACK-BACKUP.zip`. Reverting the source does not require changing installed Minecraft mods, Java runtimes, resource packs, accounts or settings. Extract the old complete ZIP into a separate folder and preview it with `npm install && npm start`. If publishing an older implementation, use a new unused version/tag; never overwrite an existing GitHub release. To revert just this JVM change while retaining other fixes, restore `src/main.js` and `package.json` from v1.6.52 and omit `src/launch-jvm.js` and `scripts/verify-v1653.js`, then bump to a new release version. This removes the StackShadowPages safeguard for 26.3.
+
+
+## v1.6.54 JVM argument verification rollback
+
+An unchanged v1.6.53 complete-source backup is provided separately as `SpectorClient-Launcher-v1.6.53-ROLLBACK-BACKUP.zip`. It retains the original StackShadowPages v1.6.53 implementation. Keep source rollback separate from Minecraft data and never reuse a released GitHub version tag.
