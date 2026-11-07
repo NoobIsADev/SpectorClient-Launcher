@@ -16,7 +16,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'ut
 const mainClass = 'net.fabricmc.loader.impl.launch.knot.KnotClient';
 const shadow = /^-XX:StackShadowPages(?:=.*)?$/;
 
-assert.equal(pkg.version, '1.6.54');
+assert(Number(pkg.version.split('.')[2]) >= 54, 'Keep v1.6.54 Windows JVM checks in future releases');
 assert(pkg.scripts['verify:ui'].includes('verify-v1653.js'));
 assert(pkg.scripts['verify:ui'].includes('verify-v1654.js'));
 assert(source.includes("launcher.on('arguments', onJavaArguments)"), 'Hook actual MCLC pre-spawn argv event');
@@ -146,6 +146,7 @@ async function runPlay(version, { conf = {}, extraJvm = [], extraGame = [], drop
     width: 1280, height: 720, theme: 'classic', ...conf
   };
   const scope = {
+    process: { platform: 'win32' }, // Simulated Windows launch path
     ipcMain: { handle: (name, f) => handlers.set(name, f) }, launcher: client,
     mainWindow: { isDestroyed: () => false, isVisible: () => true, show: () => {}, hide: () => {} },
     loadSettings: async () => settings, saveSettings: async () => {},

@@ -1,6 +1,6 @@
 {
   "name": "spectorclient-launcher",
-  "version": "1.6.54",
+  "version": "1.6.55",
   "description": "SpectorClient Electron launcher for Windows, Linux, and macOS with selectable Minecraft clients, Content management via Modrinth and CurseForge, shared client settings, managed Java runtimes, Satellite friends/messaging, native notifications, and automatic updates where supported.",
   "main": "src/main.js",
   "author": "SpectorClient",
@@ -27,7 +27,7 @@
     "predist:mac": "npm run fetch-brand",
     "release:mac": "npm run prepare-secrets && npm run fetch-brand && electron-builder --mac dmg zip --universal --publish never",
     "build:release:mac": "npm run release:mac",
-    "verify:ui": "node scripts/verify-v1643.js && node scripts/verify-v1644.js && node scripts/verify-v1645.js && node scripts/verify-v1646.js && node scripts/verify-v1647.js && node scripts/verify-v1648.js && node scripts/verify-v1649.js && node scripts/verify-v1650.js && node scripts/verify-v1651.js && node scripts/verify-v1652.js && node scripts/verify-v1653.js && node scripts/verify-v1654.js"
+    "verify:ui": "node scripts/verify-v1643.js && node scripts/verify-v1644.js && node scripts/verify-v1645.js && node scripts/verify-v1646.js && node scripts/verify-v1647.js && node scripts/verify-v1648.js && node scripts/verify-v1649.js && node scripts/verify-v1650.js && node scripts/verify-v1651.js && node scripts/verify-v1652.js && node scripts/verify-v1653.js && node scripts/verify-v1654.js && node scripts/verify-v1655.js"
   },
   "dependencies": {
     "minecraft-launcher-core": "3.18.2",

@@ -1,6 +1,17 @@
-# SpectorClient Launcher v1.6.54
+# SpectorClient Launcher v1.6.55
 
 SpectorClient is an Electron launcher for Minecraft **1.21.11, 26.2 and 26.3**. It retains the Microsoft account system, per-version Fabric content manager, auto-downloaded Java runtimes, Spector Satellite friends/messaging, logs, themes and the existing GitHub publication workflow.
+
+## v1.6.55 — Restore original Linux/macOS Java launch arguments
+
+- **Windows + Minecraft 26.3:** retain the v1.6.53–1.6.54 fix: `-XX:StackShadowPages=32` as the minimum, exactly one effective flag before Fabric's Java main class. A saved higher value is preserved. Windows continues normalizing conflicting saved JVM/game arguments and checking the final assembled command before spawning Java.
+- **Linux and macOS + Minecraft 26.3:** restore the exact launch-option defaults from v1.6.52: `customArgs: []` and `customLaunchArgs: []`. The launcher does **not** add, normalize, or move any `StackShadowPages` argument; it does **not** register a final-argv mutation/verification listener on these operating systems. This also avoids restoring previously ignored per-profile JVM settings there. Minecraft/Fabric supply their normal platform-specific JVM options unchanged.
+- **Minecraft 1.21.11 and 26.2 on every OS:** unchanged from prior releases.
+- **Other behavior:** continue using the same Fabric launcher, user-selected RAM, Java installation, game files, resource packs, Microsoft login, original tracked game child process, exit/playtime notifications, and Stop behavior. No account or instance-data migration is needed.
+- **Testing:** `npm run verify:ui` includes a new cross-platform mocked Play-handler test for Windows (`win32`), Linux (`linux`), and macOS (`darwin`) across all supported Minecraft versions, saved profiles, and process exit tracking. This verifies code behavior but cannot replace running Minecraft on each OS.
+- **Rollback:** an untouched full v1.6.54 source ZIP is supplied separately. No release tag is reused.
+
+> Historical v1.6.53 and v1.6.54 sections below describe their original all-platform implementation. Since v1.6.55, that JVM enforcement applies **only to Windows Minecraft 26.3**.
 
 ## v1.6.54 — Final JVM argument placement hardening
 
@@ -109,7 +120,7 @@ The original logo is downloaded by `scripts/fetch-brand.js` on first setup; the 
 
 ## Publish
 
-After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.54`) and will refuse to reuse an existing GitHub tag.
+After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.55`) and will refuse to reuse an existing GitHub tag.
 
 ## Rollback
 

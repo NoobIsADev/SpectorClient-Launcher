@@ -3954,12 +3954,16 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
       customArgs: []
     };
 
+    // Windows-only compatibility setting for Minecraft 26.3.
+    // On Linux and macOS, use the exact pre-v1.6.53 JVM/game-argument
+    // defaults (empty customArgs/customLaunchArgs); never inject or
+    // normalize StackShadowPages on those systems. All other Minecraft
+    // versions also retain their original launch behavior.
+    const useWindows263StackShadow = process.platform === 'win32' && isMinecraft263(opts);
     // MCLC uses customArgs for JVM options (before -cp/main class), whereas
-    // customLaunchArgs are game arguments (after the main class). For 26.3,
-    // restore saved custom/profile flags and normalize StackShadowPages here,
-    // rather than applying a second launch or changing the Java runtime.
-    // Other Minecraft versions keep their existing launch options unchanged.
-    if (isMinecraft263(opts)) {
+    // customLaunchArgs are game arguments (after the main class). Windows
+    // 26.3 keeps saved profile/custom JVM settings and final verification.
+    if (useWindows263StackShadow) {
       const savedArguments = getCustomLaunchArguments(merged);
       opts.customArgs = normalizeCustomJvmArgs(savedArguments.jvm, opts.version.number);
       opts.customLaunchArgs = savedArguments.game;
@@ -3987,15 +3991,17 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
         log(`[Java] Verified Minecraft ${opts.version.number} Java argv: -XX:StackShadowPages=${result.pages} occurs exactly once at JVM index ${result.flagIndex}, before main class ${result.mainClass} (index ${result.mainClassIndex})${result.relocatedFromGameArgs ? `; moved ${result.relocatedFromGameArgs} misplaced flag(s) out of game arguments` : ''}.`, 'launcher');
       }
     };
-    launcher.on('arguments', onJavaArguments);
+    // Do not install an argv-mutating listener on Linux or macOS. They must
+    // receive the original arguments directly from MCLC, as in v1.6.52.
+    if (useWindows263StackShadow) launcher.on('arguments', onJavaArguments);
     let child;
     try {
       child = await launcher.launch(opts);
     } finally {
-      launcher.removeListener('arguments', onJavaArguments);
+      if (useWindows263StackShadow) launcher.removeListener('arguments', onJavaArguments);
     }
-    if (isMinecraft263(opts) && !finalJvmVerified) {
-      throw new Error('Minecraft 26.3 could not verify its final JVM arguments. Java launch cancelled.');
+    if (useWindows263StackShadow && !finalJvmVerified) {
+      throw new Error('Minecraft 26.3 on Windows could not verify its final JVM arguments. Java launch cancelled.');
     }
     if (!child || typeof child.once !== 'function') {
       throw new Error(`Minecraft ${selectedGameVersion} did not return a running game process.`);

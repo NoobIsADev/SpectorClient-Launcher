@@ -121,6 +121,7 @@ async function simulatePlay({ gameVersion, input = {}, profile = null, extraGene
   };
   const mainWindow = { isDestroyed: () => false, isVisible: () => true, show: () => {}, hide: () => {} };
   const scope = {
+    process: { platform: 'win32' }, // Simulated Windows launch path
     ipcMain: { handle: (name, fn) => hooks.set(name, fn) },
     app: {}, launcher: client, mainWindow, log: (s) => javaLogs.push(s),
     loadSettings: async () => config, saveSettings: async () => {},

@@ -58,3 +58,8 @@ The exact complete v1.6.52 source (40 files) is backed up separately as `Spector
 ## v1.6.54 JVM argument verification rollback
 
 An unchanged v1.6.53 complete-source backup is provided separately as `SpectorClient-Launcher-v1.6.53-ROLLBACK-BACKUP.zip`. It retains the original StackShadowPages v1.6.53 implementation. Keep source rollback separate from Minecraft data and never reuse a released GitHub version tag.
+
+
+## v1.6.55 Windows-only JVM fix rollback
+
+A complete untouched, byte-identical v1.6.54 source backup is supplied as `SpectorClient-Launcher-v1.6.54-ROLLBACK-BACKUP.zip`. The new launch behavior only gates the existing JVM argument handler to Windows Minecraft 26.3; it does not alter your installed Java, Minecraft versions, mods, user settings, images or accounts. To revert the change, use the v1.6.54 source in a separate folder. If publishing a rollback, bump the version to a new unused tag.
