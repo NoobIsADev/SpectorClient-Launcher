@@ -9,50 +9,62 @@
 </head>
 <body>
   <div class="log-shell">
-    <header class="log-head">
-      <div class="brand">
-        <img src="assets/spector-logo.png" alt="" />
-        <div><small>SPECTORCLIENT</small><b>Logs</b></div>
+    <header class="log-head" aria-label="SpectorClient log window">
+      <div class="brand" aria-label="SpectorClient Logs">
+        <div class="brand-wordmark"><span>Spector</span><b>Client</b></div>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-section">Logs</span>
       </div>
       <div class="actions">
-        <label><input id="autoScroll" type="checkbox" checked /> Auto-scroll</label>
-        <button id="clearBtn">Clear</button>
+        <span class="live-indicator"><span class="live-dot" aria-hidden="true"></span>Live console</span>
+        <label class="auto-scroll-control"><input id="autoScroll" type="checkbox" checked aria-label="Auto-scroll" /> <span>Auto-scroll</span></label>
+        <button id="clearBtn" type="button">Clear logs</button>
       </div>
     </header>
 
-    <section class="log-toolbar" aria-label="Log filters">
+    <section class="log-toolbar" aria-label="Search and filter logs">
       <div class="log-search-wrap">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
-        <input id="logSearch" type="search" placeholder="Filter log text..." autocomplete="off" />
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m15.6 15.6 4.7 4.7"/></svg>
+        <label for="logSearch" class="sr-only">Search logs</label>
+        <input id="logSearch" type="search" placeholder="Search output..." autocomplete="off" />
       </div>
-      <div class="filter-group" aria-label="Source filters">
-        <button class="filter-chip active" data-source="all">All sources</button>
-        <button class="filter-chip" data-source="launcher">Launcher</button>
-        <button class="filter-chip" data-source="game">Game</button>
-        <button class="filter-chip" data-source="updater">Updater</button>
-        <button class="filter-chip" data-source="debug">Debug</button>
-      </div>
-      <div class="filter-group level-filters" aria-label="Severity filters">
-        <button class="filter-chip active" data-level="all">All levels</button>
-        <button class="filter-chip" data-level="info">Info</button>
-        <button class="filter-chip" data-level="warn">Warn</button>
-        <button class="filter-chip" data-level="error">Error</button>
-        <button class="filter-chip" data-level="debug">Debug</button>
+      <div class="log-filter-bars">
+        <div class="filter-group" aria-label="Log source filters">
+          <button class="filter-chip active" type="button" data-source="all" aria-pressed="true">All sources</button>
+          <button class="filter-chip" type="button" data-source="launcher" aria-pressed="false">Launcher</button>
+          <button class="filter-chip" type="button" data-source="game" aria-pressed="false">Game</button>
+          <button class="filter-chip" type="button" data-source="updater" aria-pressed="false">Updater</button>
+          <button class="filter-chip" type="button" data-source="debug" aria-pressed="false">Debug</button>
+        </div>
+        <span class="filter-divider" aria-hidden="true"></span>
+        <div class="filter-group level-filters" aria-label="Log severity filters">
+          <button class="filter-chip active" type="button" data-level="all" aria-pressed="true">All levels</button>
+          <button class="filter-chip" type="button" data-level="info" aria-pressed="false">Info</button>
+          <button class="filter-chip" type="button" data-level="warn" aria-pressed="false">Warn</button>
+          <button class="filter-chip" type="button" data-level="error" aria-pressed="false">Error</button>
+          <button class="filter-chip" type="button" data-level="debug" aria-pressed="false">Debug</button>
+        </div>
       </div>
     </section>
 
-    <section class="log-summary" aria-label="Log summary">
-      <div><span>Total</span><b id="totalCount">0</b></div>
-      <div><span>Visible</span><b id="visibleCount">0</b></div>
+    <section class="log-summary" aria-label="Log statistics">
+      <div><span>Total events</span><b id="totalCount">0</b></div>
+      <div><span>Showing</span><b id="visibleCount">0</b></div>
       <div><span>Warnings</span><b id="warningCount">0</b></div>
       <div><span>Errors</span><b id="errorCount">0</b></div>
-      <div class="log-state"><span>Status</span><b id="streamState">Live</b></div>
+      <div class="log-state"><span>Stream</span><b><span class="status-pulse" aria-hidden="true"></span><span id="streamState">Live</span></b></div>
     </section>
 
-    <main>
-      <div id="logOutput" class="log-output" role="log" aria-live="polite">
-        <div class="log-empty">No logs yet.</div>
-      </div>
+    <main class="log-main">
+      <section class="log-console" aria-label="Minecraft and launcher output">
+        <div class="console-head">
+          <div class="console-title"><span class="console-title-mark" aria-hidden="true"></span><h1>Console output</h1><span class="console-subtitle">Launcher · Minecraft · Updater</span></div>
+          <span class="console-format">LIVE OUTPUT</span>
+        </div>
+        <div id="logOutput" class="log-output" role="log" aria-label="Live log messages" aria-live="off">
+          <div class="log-empty">No logs yet.</div>
+        </div>
+      </section>
     </main>
   </div>
   <script src="logs.js"></script>

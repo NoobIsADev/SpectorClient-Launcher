@@ -152,7 +152,10 @@ searchInput.addEventListener('input', () => {
 document.querySelectorAll('[data-source]').forEach((button) => {
   button.addEventListener('click', () => {
     sourceFilter = button.dataset.source || 'all';
-    document.querySelectorAll('[data-source]').forEach((item) => item.classList.toggle('active', item === button));
+    document.querySelectorAll('[data-source]').forEach((item) => {
+      item.classList.toggle('active', item === button);
+      item.setAttribute('aria-pressed', String(item === button));
+    });
     render({ preserveBottom: false });
   });
 });
@@ -160,7 +163,10 @@ document.querySelectorAll('[data-source]').forEach((button) => {
 document.querySelectorAll('[data-level]').forEach((button) => {
   button.addEventListener('click', () => {
     levelFilter = button.dataset.level || 'all';
-    document.querySelectorAll('[data-level]').forEach((item) => item.classList.toggle('active', item === button));
+    document.querySelectorAll('[data-level]').forEach((item) => {
+      item.classList.toggle('active', item === button);
+      item.setAttribute('aria-pressed', String(item === button));
+    });
     render({ preserveBottom: false });
   });
 });

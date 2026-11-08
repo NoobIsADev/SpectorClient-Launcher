@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="refinements-v1649.css" />
   <link rel="stylesheet" href="refinements-v1650.css" />
   <link rel="stylesheet" href="refinements-v1651.css" />
+  <link rel="stylesheet" href="refinements-v1658.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -397,16 +398,22 @@
         </div>
       </section>
 
-      <section id="view-logs" class="view scroll-view">
-        <div class="section-head">
+      <section id="view-logs" class="view scroll-view diagnostics-view">
+        <div class="section-head diagnostics-head">
           <div>
             <div class="overline">DIAGNOSTICS</div>
-            <h2>Logs</h2>
-            <p>Launcher, installer and game output.</p>
+            <h2>Launcher logs</h2>
+            <p>Live Minecraft, Fabric, and SpectorClient output.</p>
           </div>
-          <button id="clearLogsBtn" class="secondary-btn">Clear</button>
+          <button id="clearLogsBtn" class="secondary-btn" type="button">Clear logs</button>
         </div>
-        <pre id="logOutput" class="logs">No logs yet.</pre>
+        <div class="embedded-log-card">
+          <div class="embedded-log-card-head">
+            <span class="embedded-log-card-title"><span aria-hidden="true" class="embedded-log-accent"></span>Console output</span>
+            <span class="embedded-log-card-caption">LIVE OUTPUT</span>
+          </div>
+          <pre id="logOutput" class="logs" aria-label="Launcher log output">No logs yet.</pre>
+        </div>
       </section>
     </main>
 

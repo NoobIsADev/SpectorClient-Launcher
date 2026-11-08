@@ -17,7 +17,7 @@ const source = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
 const main = 'net.fabricmc.loader.impl.launch.knot.KnotClient';
 const shadow = /^-XX:StackShadowPages(?:=.*)?$/;
 
-assert.equal(pkg.version, '1.6.55');
+assert(Number(pkg.version.split('.')[2]) >= 55, 'Must preserve the v1.6.55 platform JVM behavior in later versions');
 assert(pkg.scripts['verify:ui'].includes('verify-v1655.js'));
 assert(source.includes("process.platform === 'win32' && isMinecraft263(opts)"), 'OS gate must guard actual Minecraft version');
 assert(source.includes('if (useWindows263StackShadow) launcher.on('), 'Pre-spawn mutation must be Windows-only');

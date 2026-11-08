@@ -1,0 +1,68 @@
+/* SpectorClient v1.6.58: keep the archived in-app Logs page visually
+   consistent with the redesigned, detached Logs console. */
+#view-logs.diagnostics-view {
+  background: #0e1015;
+  min-width: 0;
+}
+#view-logs .diagnostics-head { margin-bottom: 19px; }
+#view-logs .diagnostics-head .overline { color: var(--ui-accent, #98ddff); }
+#view-logs .diagnostics-head h2 { color: #eef5fd; }
+#view-logs .diagnostics-head p { color: #a9b5c5; }
+#view-logs .diagnostics-head .secondary-btn {
+  border-color: #435468 !important;
+  background: #263643 !important;
+  color: #b5e7ff !important;
+  border-radius: 9px !important;
+  min-height: 35px;
+  padding: 8px 14px;
+  font-weight: 700;
+}
+#view-logs .embedded-log-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: min(68vh, 720px);
+  min-height: 260px;
+  overflow: hidden;
+  border: 1px solid #303742;
+  border-radius: 12px;
+  background: #0e1015;
+}
+#view-logs .embedded-log-card-head {
+  min-height: 45px;
+  flex: 0 0 45px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #272c36;
+  background: #191d24;
+}
+#view-logs .embedded-log-card-title { display: inline-flex; gap: 9px; align-items: center; color: #edf4fc; font-size: 12px; font-weight: 760; }
+#view-logs .embedded-log-accent { width: 3px; height: 15px; border-radius: 2px; background: #98ddff; }
+#view-logs .embedded-log-card-caption { color: #8695a6; font-weight: 800; font-size: 9px; letter-spacing: .8px; }
+#view-logs .embedded-log-card > .logs {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #0e1015 !important;
+  color: #d2deea !important;
+  box-shadow: none !important;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace !important;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  padding: 15px 17px;
+}
+@media(max-width: 850px) {
+  #view-logs .diagnostics-head { flex-wrap: wrap; }
+  #view-logs .embedded-log-card { height: min(62vh, 620px); }
+}

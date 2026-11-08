@@ -1,3 +1,15 @@
+## Rollback from v1.6.58
+
+The exact, complete v1.6.57 Electron source is kept as `SpectorClient-Launcher-v1.6.57-ROLLBACK-BACKUP.zip`. Restore that ZIP to revert the Logs presentation. Game processes, accounts, mods, and settings were not migrated or altered.
+
+# v1.6.57 Electron-only restoration
+
+SpectorClient v1.6.57 is based on the **full v1.6.55 Electron source** (44 original files), not on the experimental v1.6.56 Tauri app. There are no Tauri or Rust source files in the current release. v1.6.56 remains a separately archived experimental source ZIP, not a runtime dependency, updater target, or forced migration. The original Microsoft accounts, game installations, mods, profiles, RAM settings, Satellite and Electron update behavior are retained.
+
+To revert to v1.6.55 exactly, keep the original `SpectorClient-Launcher-v1.6.55-Full-Source.zip` separately. Don't reuse an existing public GitHub tag when publishing a rollback; bump to another unused version. No user-data conversion is necessary to use this Electron-only version.
+
+---
+
 # SpectorClient — v1.6.45 redesign and safe rollback
 
 **Complete v1.6.44 backup preserved separately.** Archive: `SpectorClient-Launcher-v1.6.44-ROLLBACK-BACKUP.zip` (SHA-256 `d7b1d174d11fd5dc159dd5547b692f3bab460ca1a7e5893bf33f52127f2e470c`). It is byte-for-byte identical to the complete original v1.6.44 source archive.

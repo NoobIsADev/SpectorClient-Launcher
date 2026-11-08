@@ -1,4 +1,25 @@
-# SpectorClient Launcher v1.6.55
+## v1.6.58 — Unified Logs interface (Electron only)
+
+- Restyled the detached Logs window to match the black/charcoal launcher with theme-aware cyan/Crimson/Prince/Pink accents.
+- Larger readable console output, simplified controls, responsive search, source and severity filters, clear logs, auto-scroll, and live counts retained.
+- Aligned the archived in-app Logs view with the same design. No changes to Minecraft launching, logging IPC, Java arguments, or game process tracking.
+- No Rust/Tauri code. v1.6.57 complete source is retained as the rollback backup.
+
+# SpectorClient Launcher v1.6.57 — Electron Only
+
+## v1.6.57 — Tauri/Rust migration canceled
+
+This release is **Electron only**, restored from the complete original v1.6.55 Electron source and assigned a new patch version. The experimental v1.6.56 Rust/Tauri preview is **not** included and is **not** installed by this release.
+
+- Preserved all launcher UI, Minecraft 1.21.11/26.2/26.3 Fabric launching, Microsoft account login, mod management, managed Java, Satellite, logs, and profiles.
+- Preserved the Windows-only `-XX:StackShadowPages=32` minimum for Minecraft 26.3 and original JVM behavior on Linux and macOS.
+- Retained Electron updater releases, Windows NSIS, Linux x86_64 AppImage, and universal macOS DMG/ZIP configurations.
+- **No automatic Electron-to-Rust transition**, no Tauri updater or Rust dependencies. Installed Minecraft data and launcher settings are unchanged.
+- Check the sources with `npm run verify:ui`. The full Electron release and game run still require real-world OS and Minecraft testing.
+
+---
+
+## Historical v1.6.55 changes
 
 SpectorClient is an Electron launcher for Minecraft **1.21.11, 26.2 and 26.3**. It retains the Microsoft account system, per-version Fabric content manager, auto-downloaded Java runtimes, Spector Satellite friends/messaging, logs, themes and the existing GitHub publication workflow.
 
@@ -120,7 +141,7 @@ The original logo is downloaded by `scripts/fetch-brand.js` on first setup; the 
 
 ## Publish
 
-After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.55`) and will refuse to reuse an existing GitHub tag.
+After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.57`) and will refuse to reuse an existing GitHub tag.
 
 ## Rollback
 
