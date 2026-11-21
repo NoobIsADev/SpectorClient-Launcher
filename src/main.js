@@ -10,7 +10,8 @@ const { Authflow } = require('prismarine-auth');
 const { Client } = require('minecraft-launcher-core');
 const { autoUpdater } = require('electron-updater');
 const WebSocket = require('ws');
-const { downloadSpectorJar, verifyFabricJar, installVerifiedSpectorJar } = require('./spector-mod-network');
+const { downloadSpectorJar, verifyFabricJar, verifyForgeJar, installVerifiedSpectorJar } = require('./spector-mod-network');
+const { FORGE_VERSION: LEGACY_FORGE_VERSION, ensureForgeUniversal } = require('./legacy-forge');
 const { minecraftVersion, isMinecraft263, getCustomLaunchArguments, normalizeCustomJvmArgs, enforceFinalJvmArguments } = require('./launch-jvm');
 
 // Keep only one SpectorClient process alive. Multiple launcher processes can
@@ -26,9 +27,10 @@ const WINDOWS_APP_ID = 'client.spector.launcher';
 const WINDOWS_TOAST_CLSID = '{7C0F70F8-9A1B-4A7E-8C1E-7D2AF30F6C91}';
 const DEFAULT_GAME_VERSION = '26.2';
 const CLIENT_PROFILES = Object.freeze({
-  '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download', javaMajor: 25 },
-  '26.3': { label: 'SpectorClient 26.3', modUrl: 'https://spectorclient.com/mod/download/26.3', javaMajor: 25 },
-  '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11', javaMajor: 21 }
+  '26.2': { label: 'SpectorClient 26.2', modUrl: 'https://spectorclient.com/mod/download', javaMajor: 25, loader: 'fabric' },
+  '26.3': { label: 'SpectorClient 26.3', modUrl: 'https://spectorclient.com/mod/download/26.3', javaMajor: 25, loader: 'fabric' },
+  '1.21.11': { label: 'SpectorClient 1.21.11', modUrl: 'https://spectorclient.com/mod/download/1.21.11', javaMajor: 21, loader: 'fabric' },
+  '1.8.9': { label: 'SpectorClient 1.8.9', modUrl: 'https://spectorclient.com/mod/download/legacy', javaMajor: 8, loader: 'forge', forgeVersion: LEGACY_FORGE_VERSION }
 });
 const SPECTOR_MOD_FILENAME = 'spectorclient.jar';
 const LEGACY_SPECTOR_MOD_FILENAMES = ['spectorclient-1.0.0.jar'];
@@ -142,6 +144,15 @@ function getClientProfile(value) {
   return { gameVersion, ...CLIENT_PROFILES[gameVersion] };
 }
 
+function modLoaderFor(gameVersion) {
+  return getClientProfile(gameVersion).loader;
+}
+
+function isFabricClient(gameVersion) {
+  return modLoaderFor(gameVersion) === 'fabric';
+}
+
+
 function getInstanceRoot(value) {
   const gameVersion = normalizeGameVersion(value);
   return path.join(APPDATA_ROOT, 'instances', gameVersion);
@@ -175,6 +186,7 @@ function defaultSettings() {
     maxRamGb: 6,
     java25Path: '',
     java21Path: '',
+    java8Path: '',
     width: 1280,
     height: 720,
     fullscreen: false,
@@ -434,9 +446,13 @@ async function ensureSharedFileForVersion(gameVersion, entryName) {
 async function ensureSharedDataForVersion(gameVersion) {
   gameVersion = normalizeGameVersion(gameVersion);
   for (const entryName of SHARED_INSTANCE_DIRECTORIES) {
+    // Old Forge config and modern Fabric config must not overwrite each other.
+    if (gameVersion === '1.8.9' && entryName === 'config') continue;
     await ensureSharedDirectoryForVersion(gameVersion, entryName);
   }
   for (const entryName of SHARED_INSTANCE_FILES) {
+    // Minecraft 1.8.9 cannot safely share options.txt with 1.21/26.x.
+    if (gameVersion === '1.8.9' && entryName === 'options.txt') continue;
     await ensureSharedFileForVersion(gameVersion, entryName);
   }
 }
@@ -518,7 +534,7 @@ function managedJavaPath(major) {
 }
 
 function javaSettingsKey(major) {
-  return Number(major) === 21 ? 'java21Path' : 'java25Path';
+  return Number(major) === 8 ? 'java8Path' : Number(major) === 21 ? 'java21Path' : 'java25Path';
 }
 
 async function pathExists(filePath) {
@@ -546,6 +562,8 @@ function execFilePromise(file, args, options = {}) {
 
 function parseJavaMajor(output) {
   const text = String(output || '');
+  // Java 8 reports "1.8.0_xxx", while Java 21/25 report "21.x"/"25.x".
+  if (/\bversion ["']1\.8(?:[.\-_]|["'])/i.test(text)) return 8;
   const match = text.match(/(?:openjdk|java) version ["'](\d+)(?:[.\-+_][^"']*)?["']/i)
     || text.match(/version ["'](\d+)(?:\.|["'])/i);
   return match ? Number(match[1]) : null;
@@ -756,7 +774,7 @@ async function extractJavaArchive(downloadPath, stagingDir) {
 
 async function installManagedJava(major) {
   major = Number(major);
-  if (![21, 25].includes(major)) throw new Error(`Unsupported managed Java version: ${major}`);
+  if (![8, 21, 25].includes(major)) throw new Error(`Unsupported managed Java version: ${major}`);
   if (!['win32', 'linux', 'darwin'].includes(process.platform)) {
     throw new Error(`Automatic Java ${major} installation is not supported on ${process.platform}. Select Java ${major} manually in Settings.`);
   }
@@ -898,7 +916,7 @@ async function ensureManagedJava(major, { force = false } = {}) {
 }
 
 async function removeManagedJavaCompletely(major) {
-  major = Number(major) === 21 ? 21 : 25;
+  major = [8, 21, 25].includes(Number(major)) ? Number(major) : 25;
   if (activeGameProcess && activeGameProcess.exitCode == null) {
     throw new Error(`Close Minecraft before repairing Java ${major}.`);
   }
@@ -925,7 +943,7 @@ async function removeManagedJavaCompletely(major) {
 }
 
 async function repairManagedJava(major) {
-  major = Number(major) === 21 ? 21 : 25;
+  major = [8, 21, 25].includes(Number(major)) ? Number(major) : 25;
   log(`[Java] Repair requested for managed Java ${major}. Removing the existing runtime completely.`, 'launcher');
   send('install-state', { step: `Java ${major}`, message: `Repairing Java ${major}…` });
   await removeManagedJavaCompletely(major);
@@ -2395,6 +2413,7 @@ async function ensureFabricProfile(gameVersion) {
 
 async function ensureFabricApi(gameVersion, { silent = false } = {}) {
   const selectedVersion = normalizeGameVersion(gameVersion);
+  if (!isFabricClient(selectedVersion)) throw new Error(`Fabric API is not used with ${modLoaderFor(selectedVersion)} Minecraft ${selectedVersion}.`);
   if (fabricApiRefreshPromises.has(selectedVersion)) return fabricApiRefreshPromises.get(selectedVersion);
 
   const refreshPromise = (async () => {
@@ -2463,7 +2482,7 @@ async function findInstalledSpectorMod(gameVersion) {
   for (const filename of [SPECTOR_MOD_FILENAME, ...LEGACY_SPECTOR_MOD_FILENAMES]) {
     const candidate = path.join(modsDir, filename);
     try {
-      await verifyFabricJar(candidate);
+      await (isFabricClient(gameVersion) ? verifyFabricJar(candidate) : verifyForgeJar(candidate));
       return candidate;
     } catch (error) {
       // A missing or corrupt local copy must not be offered as a usable mod.
@@ -2542,6 +2561,7 @@ async function ensureSpectorMod(gameVersion) {
     const download = await downloadSpectorJar(profile.modUrl, destination, {
       userAgent: USER_AGENT,
       attempts: 3,
+      loader: profile.loader,
       onRetry: ({ attempt, attempts, delayMs, error }) => {
         log(`[SpectorClient ${selectedVersion}] Download attempt ${attempt}/${attempts} failed (${error.message}); retrying in ${Math.round(delayMs / 100) / 10}s.`, 'warn');
         send('install-state', {
@@ -2558,7 +2578,7 @@ async function ensureSpectorMod(gameVersion) {
       })
     });
     stagedDestination = download.path;
-    await installVerifiedSpectorJar(stagedDestination, destination, { legacyFiles: LEGACY_SPECTOR_MOD_FILENAMES });
+    await installVerifiedSpectorJar(stagedDestination, destination, { legacyFiles: LEGACY_SPECTOR_MOD_FILENAMES, loader: profile.loader });
     stagedDestination = null;
     log(`SpectorClient ${selectedVersion} mod verified and updated from ${profile.modUrl} (attempt ${download.attempt}).`);
     return { path: destination, skipped: false };
@@ -2591,8 +2611,22 @@ async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
   const selectedVersion = normalizeGameVersion(gameVersion);
   await ensureDirs();
   send('install-state', { step: 'Preparing', text: `Preparing SpectorClient for Minecraft ${selectedVersion}…`, percent: 0, gameVersion: selectedVersion });
-  const fabric = await ensureFabricProfile(selectedVersion);
-  const api = await ensureFabricApi(selectedVersion);
+  let loaderProfile;
+  let fabricApiVersion = null;
+  if (isFabricClient(selectedVersion)) {
+    loaderProfile = await ensureFabricProfile(selectedVersion);
+    const api = await ensureFabricApi(selectedVersion);
+    fabricApiVersion = api.version;
+  } else {
+    // minecraft-launcher-core supports old Forge using the verified universal
+    // JAR (opts.forge), not a Fabric profile or Fabric API download.
+    loaderProfile = await ensureForgeUniversal(getInstanceRoot(selectedVersion), {
+      onStatus: text => {
+        log(`[Forge ${selectedVersion}] ${text}`);
+        send('install-state', { step: 'Forge', text, gameVersion: selectedVersion });
+      }
+    });
+  }
   const spectorMod = await ensureSpectorMod(selectedVersion);
   send('install-state', {
     step: 'Ready',
@@ -2602,7 +2636,7 @@ async function prepareClient(gameVersion = DEFAULT_GAME_VERSION) {
     percent: 100,
     gameVersion: selectedVersion
   });
-  return { ...fabric, fabricApiVersion: api.version, spectorModSkipped: spectorMod.skipped, root: getInstanceRoot(selectedVersion) };
+  return { ...loaderProfile, loader: modLoaderFor(selectedVersion), fabricApiVersion, spectorModSkipped: spectorMod.skipped, root: getInstanceRoot(selectedVersion) };
 }
 
 // ---------------------------
@@ -2688,9 +2722,11 @@ async function saveModRegistry(gameVersion, registry) {
   return saveContentRegistry('mods', gameVersion, registry);
 }
 
-function isCoreModFilename(filename) {
+function isCoreModFilename(filename, gameVersion = DEFAULT_GAME_VERSION) {
   const lower = String(filename).toLowerCase();
-  return lower.startsWith('fabric-api-') || lower === SPECTOR_MOD_FILENAME.toLowerCase() || LEGACY_SPECTOR_MOD_FILENAMES.map((name) => name.toLowerCase()).includes(lower);
+  return (isFabricClient(gameVersion) && lower.startsWith('fabric-api-'))
+    || lower === SPECTOR_MOD_FILENAME.toLowerCase()
+    || LEGACY_SPECTOR_MOD_FILENAMES.some((name) => name.toLowerCase() === lower);
 }
 
 function contentFilenameAllowed(contentType, filename) {
@@ -2720,7 +2756,7 @@ async function listInstalledContent(gameVersion = DEFAULT_GAME_VERSION, contentT
       filename: entry.name,
       size: entry.isFile() ? stat.size : 0,
       directory: entry.isDirectory(),
-      core: type === 'mods' && isCoreModFilename(entry.name),
+      core: type === 'mods' && isCoreModFilename(entry.name, selectedVersion),
       projectId: registered?.projectId ? String(registered.projectId) : '',
       projectSlug: registered?.projectSlug || '',
       pageUrl: registered?.pageUrl || '',
@@ -2751,7 +2787,7 @@ function buildModrinthFacets(gameVersion, contentType) {
     [`versions:${selectedVersion}`]
   ];
   if (config.fabricOnly) {
-    facets.splice(1, 0, ['categories:fabric']);
+    facets.splice(1, 0, [`categories:${modLoaderFor(selectedVersion)}`]);
     facets.push([
       'environment:client_and_server',
       'environment:client_only',
@@ -2856,7 +2892,7 @@ async function searchCurseForgeContent(gameVersion, contentType, query, page = 1
     sortOrder: 'desc'
   });
   if (q) params.set('searchFilter', q);
-  if (config.fabricOnly) params.set('modLoaderType', '4');
+  if (config.fabricOnly) params.set('modLoaderType', modLoaderFor(selectedVersion) === 'forge' ? '1' : '4');
   const data = await curseForgeRequest(`/mods/search?${params.toString()}`);
   const hits = Array.isArray(data?.data) ? data.data : [];
   for (const hit of hits) {
@@ -2892,7 +2928,7 @@ async function getCompatibleModrinthProjectVersion(gameVersion, contentType, pro
     game_versions: JSON.stringify([selectedVersion]),
     include_changelog: 'false'
   });
-  if (config.fabricOnly) params.set('loaders', JSON.stringify(['fabric']));
+  if (config.fabricOnly) params.set('loaders', JSON.stringify([modLoaderFor(selectedVersion)]));
   const versions = await request(`${MODRINTH_API}/project/${encodeURIComponent(projectId)}/version?${params.toString()}`);
   if (!Array.isArray(versions) || !versions.length) {
     throw new Error(`No compatible Minecraft ${selectedVersion} ${config.singular} version is available.`);
@@ -2932,7 +2968,10 @@ function curseForgeFileMatches(file, selectedVersion, config) {
   if (!file || file.isAvailable === false) return false;
   const versions = Array.isArray(file.gameVersions) ? file.gameVersions.map((v) => String(v).toLowerCase()) : [];
   if (versions.length && !versions.includes(String(selectedVersion).toLowerCase())) return false;
-  if (config.fabricOnly && versions.length && !versions.some((v) => v === 'fabric' || v.includes('fabric'))) return false;
+  if (config.fabricOnly && versions.length) {
+    const tags = versions.filter(v => /^(fabric|forge|neoforge|quilt|liteloader)$/i.test(v));
+    if (tags.length && !tags.includes(modLoaderFor(selectedVersion))) return false;
+  }
   return true;
 }
 
@@ -2943,7 +2982,7 @@ async function getCompatibleCurseForgeFile(gameVersion, contentType, projectId) 
   let data;
   if (!curseForgeCoreRejected) {
     const params = new URLSearchParams({ gameVersion: selectedVersion, pageSize: '50' });
-    if (config.fabricOnly) params.set('modLoaderType', '4');
+    if (config.fabricOnly) params.set('modLoaderType', modLoaderFor(selectedVersion) === 'forge' ? '1' : '4');
     try {
       data = await curseForgeCoreRequest(`/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`);
     } catch (error) {
@@ -3030,11 +3069,11 @@ async function resolveRequiredDependencyVersion(gameVersion, dep) {
     const exact = await request(`${MODRINTH_API}/version/${encodeURIComponent(dep.version_id)}`);
     const exactLoaders = Array.isArray(exact?.loaders) ? exact.loaders : [];
     const exactGameVersions = Array.isArray(exact?.game_versions) ? exact.game_versions : [];
-    const exactCompatible = (!exactLoaders.length || exactLoaders.includes('fabric'))
+    const exactCompatible = (!exactLoaders.length || exactLoaders.includes(modLoaderFor(selectedVersion)))
       && (!exactGameVersions.length || exactGameVersions.includes(selectedVersion));
     if (exactCompatible) return exact;
     if (dep.project_id) return getCompatibleModrinthProjectVersion(selectedVersion, 'mods', dep.project_id);
-    throw new Error(`Pinned dependency version is not compatible with Fabric ${selectedVersion}.`);
+    throw new Error(`Pinned dependency version is not compatible with ${modLoaderFor(selectedVersion)} ${selectedVersion}.`);
   }
   if (dep?.project_id) return getCompatibleModrinthProjectVersion(selectedVersion, 'mods', dep.project_id);
   if (dep?.file_name) throw new Error(`Required dependency ${dep.file_name} has no Modrinth project/version ID and cannot be downloaded automatically.`);
@@ -3053,7 +3092,7 @@ async function installModrinthContentVersion(gameVersion, contentType, version, 
   if (type === 'mods') {
     const loaders = Array.isArray(version.loaders) ? version.loaders : [];
     const gameVersions = Array.isArray(version.game_versions) ? version.game_versions : [];
-    if (loaders.length && !loaders.includes('fabric')) throw new Error('A required dependency is not available for Fabric.');
+    if (loaders.length && !loaders.includes(modLoaderFor(selectedVersion))) throw new Error(`A required dependency is not available for ${modLoaderFor(selectedVersion)}.`);
     if (gameVersions.length && !gameVersions.includes(selectedVersion)) throw new Error(`A required dependency is not compatible with Minecraft ${selectedVersion}.`);
     const requiredDependencies = (version.dependencies || []).filter((d) => d.dependency_type === 'required');
     for (const dep of requiredDependencies) {
@@ -3064,7 +3103,7 @@ async function installModrinthContentVersion(gameVersion, contentType, version, 
   }
 
   const project = await request(`${MODRINTH_API}/project/${encodeURIComponent(version.project_id)}`);
-  if (type === 'mods' && project?.slug === FABRIC_API_PROJECT) {
+  if (type === 'mods' && isFabricClient(selectedVersion) && project?.slug === FABRIC_API_PROJECT) {
     await ensureFabricApi(selectedVersion);
     return { title: project.title || 'Fabric API', core: true, source: 'modrinth', projectId: FABRIC_API_PROJECT };
   }
@@ -3078,7 +3117,7 @@ async function installModrinthContentVersion(gameVersion, contentType, version, 
   const key = registryStorageKey(type, 'modrinth', version.project_id);
   const previous = registry[key] || (type === 'mods' ? registry[String(version.project_id)] : null);
 
-  if (previous?.filename && previous.filename !== filename && !(type === 'mods' && isCoreModFilename(previous.filename))) {
+  if (previous?.filename && previous.filename !== filename && !(type === 'mods' && isCoreModFilename(previous.filename, selectedVersion))) {
     await fsp.rm(path.join(directory, path.basename(previous.filename)), { force: true, recursive: true }).catch(() => {});
   }
 
@@ -3111,7 +3150,7 @@ async function installModrinthContent(gameVersion, contentType, projectId) {
   const config = getContentConfig(type);
   const id = String(projectId || '').trim();
   if (!/^[A-Za-z0-9_-]{2,80}$/.test(id)) throw new Error('Invalid Modrinth project ID.');
-  if (type === 'mods') await ensureFabricApi(selectedVersion, { silent: true });
+  if (type === 'mods' && isFabricClient(selectedVersion)) await ensureFabricApi(selectedVersion, { silent: true });
   const registryBefore = await loadContentRegistry(type, selectedVersion);
   const previous = registryEntryFor(registryBefore, type, 'modrinth', id);
   send('mod-install-state', { state: 'resolving', projectId: id, gameVersion: selectedVersion, contentType: type, provider: 'modrinth', text: `Finding a compatible Modrinth ${config.singular} for ${selectedVersion}…` });
@@ -3154,11 +3193,11 @@ async function installCurseForgeContent(gameVersion, contentType, projectId, { d
   const visitKey = `curseforge:${type}:${id}`;
   if (visited.has(visitKey)) return null;
   visited.add(visitKey);
-  if (type === 'mods' && !dependency) await ensureFabricApi(selectedVersion, { silent: true });
+  if (type === 'mods' && !dependency && isFabricClient(selectedVersion)) await ensureFabricApi(selectedVersion, { silent: true });
 
   const project = await getCurseForgeProject(id);
   if (!project) throw new Error('CurseForge project metadata was unavailable.');
-  if (type === 'mods' && String(project.slug || '').toLowerCase() === FABRIC_API_PROJECT) {
+  if (type === 'mods' && isFabricClient(selectedVersion) && String(project.slug || '').toLowerCase() === FABRIC_API_PROJECT) {
     await ensureFabricApi(selectedVersion);
     return { title: project.name || 'Fabric API', core: true, source: 'modrinth', projectId: FABRIC_API_PROJECT };
   }
@@ -3230,7 +3269,7 @@ async function removeInstalledContent(gameVersion, contentType, filename) {
   if (!safeName || safeName !== String(filename || '')) throw new Error('Invalid content filename.');
   if (type === 'mods') {
     if (!safeName.toLowerCase().endsWith('.jar')) throw new Error('Invalid mod filename.');
-    if (isCoreModFilename(safeName)) throw new Error('Fabric API and SpectorClient are required core mods and cannot be removed here.');
+    if (isCoreModFilename(safeName, selectedVersion)) throw new Error('SpectorClient and any version-specific required core mods cannot be removed here.');
   }
   const directory = getContentDir(type, selectedVersion);
   await fsp.rm(path.join(directory, safeName), { force: true, recursive: true });
@@ -3618,11 +3657,14 @@ ipcMain.handle('client:info', async () => ({
     resourcepacksDirectory: getContentDir('resourcepacks', gameVersion),
     shadersDirectory: getContentDir('shaders', gameVersion),
     modUrl: CLIENT_PROFILES[gameVersion].modUrl,
-    javaMajor: CLIENT_PROFILES[gameVersion].javaMajor
+    javaMajor: CLIENT_PROFILES[gameVersion].javaMajor,
+    loader: CLIENT_PROFILES[gameVersion].loader,
+    forgeVersion: CLIENT_PROFILES[gameVersion].forgeVersion || null
   })),
   managedJavaPaths: {
     25: managedJavaPath(25),
-    21: managedJavaPath(21)
+    21: managedJavaPath(21),
+    8: managedJavaPath(8)
   }
 }));
 ipcMain.handle('client:prepare', async (_event, gameVersion) => prepareClient(gameVersion));
@@ -3642,7 +3684,7 @@ ipcMain.handle('window:control', async (_event, action) => {
 });
 
 ipcMain.handle('dialog:choose-java', async (_event, major = 25) => {
-  const expectedMajor = Number(major) === 21 ? 21 : 25;
+  const expectedMajor = [8, 21, 25].includes(Number(major)) ? Number(major) : 25;
   const result = await dialog.showOpenDialog(mainWindow, {
     title: `Select Java ${expectedMajor} executable`,
     properties: ['openFile'],
@@ -3665,7 +3707,7 @@ ipcMain.handle('dialog:choose-java', async (_event, major = 25) => {
 });
 
 ipcMain.handle('java:install', async (_event, major = 25) => {
-  const expectedMajor = Number(major) === 21 ? 21 : 25;
+  const expectedMajor = [8, 21, 25].includes(Number(major)) ? Number(major) : 25;
   const javaExecutable = await ensureManagedJava(expectedMajor);
   const inspection = await inspectJava(javaExecutable, expectedMajor);
   if (!inspection.ok) throw new Error(`Managed Java ${expectedMajor} failed verification: ${inspection.reason}`);
@@ -3699,7 +3741,7 @@ ipcMain.handle('folder:open-content', async (_event, gameVersion, contentType) =
 ipcMain.handle('content:list', async (_event, gameVersion, contentType) => {
   const selectedVersion = normalizeGameVersion(gameVersion);
   const type = normalizeContentType(contentType);
-  if (type === 'mods') await ensureFabricApi(selectedVersion, { silent: true }).catch((error) => log(`Fabric API ${selectedVersion} content-list update check failed: ${error.message}`, 'debug'));
+  if (type === 'mods' && isFabricClient(selectedVersion)) await ensureFabricApi(selectedVersion, { silent: true }).catch((error) => log(`Fabric API ${selectedVersion} content-list update check failed: ${error.message}`, 'debug'));
   return listInstalledContent(selectedVersion, type);
 });
 ipcMain.handle('content:search', async (_event, gameVersion, contentType, provider, query, page) => searchContent(gameVersion, contentType, provider, query, page));
@@ -3930,7 +3972,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
     await ensureSharedDataForVersion(selectedGameVersion);
 
     send('game-state', { state: 'installing', text: 'Checking client files…' });
-    const fabric = await prepareClient(selectedGameVersion);
+    const preparedClient = await prepareClient(selectedGameVersion);
 
     send('game-state', { state: 'authenticating', text: 'Refreshing Microsoft/Minecraft session…' });
     const session = await getMinecraftSession(account.id, false);
@@ -3942,7 +3984,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
       version: {
         number: selectedGameVersion,
         type: 'release',
-        custom: fabric.versionId
+        ...(preparedClient.loader !== 'forge' ? { custom: preparedClient.versionId } : {})
       },
       memory: { min: `${minRam}G`, max: `${maxRam}G` },
       window: {
@@ -3951,7 +3993,11 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
         fullscreen: Boolean(merged.fullscreen)
       },
       customLaunchArgs: [],
-      customArgs: []
+      customArgs: [],
+      ...(preparedClient.loader === 'forge' ? {
+        forge: preparedClient.forgePath,
+        overrides: { url: { mavenForge: 'https://maven.minecraftforge.net/', defaultRepoForge: 'https://libraries.minecraft.net/' } }
+      } : {})
     };
 
     // Windows-only compatibility setting for Minecraft 26.3.
@@ -3971,7 +4017,7 @@ ipcMain.handle('game:launch', async (_event, launchInput = {}) => {
 
     opts.javaPath = javaExecutable;
     if (merged.serverAddress?.trim()) {
-      opts.quickPlay = { type: 'multiplayer', identifier: merged.serverAddress.trim() };
+      opts.quickPlay = { type: selectedGameVersion === '1.8.9' ? 'legacy' : 'multiplayer', identifier: merged.serverAddress.trim() };
     }
 
     bindLauncherEvents();
@@ -4121,11 +4167,14 @@ app.whenReady().then(async () => {
     ensureManagedJava(25).catch((error) => log(`Automatic Java 25 installation failed: ${error.message}`, 'debug'));
   }, 450);
 
-  // Fabric API is a required core mod. Keep the currently selected client version current at startup.
+  // Fabric API is required only for the Fabric editions. Forge 1.8.9 must
+  // never download or add Fabric API, including during launcher startup.
   setTimeout(async () => {
     const startupSettings = await loadSettings();
     const gameVersion = normalizeGameVersion(startupSettings.selectedGameVersion);
-    ensureFabricApi(gameVersion, { silent: true }).catch((error) => log(`Fabric API ${gameVersion} startup update check failed: ${error.message}`, 'debug'));
+    if (isFabricClient(gameVersion)) {
+      ensureFabricApi(gameVersion, { silent: true }).catch((error) => log(`Fabric API ${gameVersion} startup update check failed: ${error.message}`, 'debug'));
+    }
   }, 1200);
 
   // Connect the social rail after the main launcher is visible. Authentication

@@ -13,7 +13,7 @@ const logs = read('src/logs.js');
 const main = read('src/main.js');
 const inApp = read('src/index.html');
 const pkg = JSON.parse(read('package.json'));
-assert.equal(pkg.version, '1.6.58');
+assert.ok(Number(pkg.version.split('.').at(-1)) >= 58, 'v1.6.58 Logs redesign must be retained in future versions');
 assert.equal(pkg.main, 'src/main.js');
 assert.match(pkg.scripts.start, /^electron\s/);
 assert.ok(!/tauri/i.test(JSON.stringify(pkg.scripts)));

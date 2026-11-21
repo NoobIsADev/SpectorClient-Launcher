@@ -17,7 +17,7 @@ for (const description of ['Latest Minecraft release','Modern stable edition','J
   assert(!html.includes(description), `Obsolete card copy remains: ${description}`);
 }
 const matches = [...html.matchAll(/<article class="client-version-card" data-game-version="([^"]+)">([\s\S]*?)<\/article>/g)];
-assert.equal(matches.length, 3, 'All three version cards must exist');
+assert.ok(matches.length >= 3, 'All original three version cards must remain even when new versions are added');
 for (const version of ['26.3','26.2','1.21.11']) {
   const body = matches.find(([, candidate]) => candidate === version)?.[2];
   assert(body, `Missing version card ${version}`);

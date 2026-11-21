@@ -235,8 +235,8 @@ function formatDownloads(value) {
 function supportedGameVersions() {
   const values = Array.isArray(clientInfo?.supportedVersions)
     ? clientInfo.supportedVersions.map((entry) => String(entry.gameVersion || '')).filter(Boolean)
-    : ['26.2', '26.3', '1.21.11'];
-  return values.length ? values : ['26.2', '26.3', '1.21.11'];
+    : ['26.2', '26.3', '1.21.11', '1.8.9'];
+  return values.length ? values : ['26.2', '26.3', '1.21.11', '1.8.9'];
 }
 
 function normalizeGameVersion(value) {
@@ -264,6 +264,9 @@ function renderSelectedVersionUI() {
   const gameVersion = selectedGameVersion();
   if ($('selectedVersionLabel')) $('selectedVersionLabel').textContent = gameVersion;
   if ($('settingsSelectedVersion')) $('settingsSelectedVersion').textContent = gameVersion;
+  const loader = gameVersionDetails(gameVersion)?.loader || (gameVersion === '1.8.9' ? 'forge' : 'fabric');
+  if ($('settingsLoader')) $('settingsLoader').textContent = loader === 'forge' ? 'Forge' : 'Fabric';
+  if ($('settingsLoaderSupport')) $('settingsLoaderSupport').textContent = loader === 'forge' ? 'Forge 11.15.1.2318 • Java 8' : 'Fabric API automatic';
   if ($('versionActiveName')) $('versionActiveName').textContent = `SpectorClient ${gameVersion}`;
   if ($('homeFeaturedVersion')) $('homeFeaturedVersion').textContent = `MINECRAFT ${gameVersion}`;
   document.querySelectorAll('[data-game-version]').forEach((card) => {
@@ -340,10 +343,11 @@ function syncContentUiLabels() {
   // Keep version cards readable: directory paths remain internal to installs/folder actions.
   const chooserText = (version) => globalContent
     ? `Minecraft ${version} compatibility`
-    : `Fabric • Minecraft ${version}`;
+    : `${version === '1.8.9' ? 'Forge' : 'Fabric'} • Minecraft ${version}`;
   if ($('modChooserPath26')) $('modChooserPath26').textContent = chooserText('26.2');
   if ($('modChooserPath263')) $('modChooserPath263').textContent = chooserText('26.3');
   if ($('modChooserPath12111')) $('modChooserPath12111').textContent = chooserText('1.21.11');
+  if ($('modChooserPath189')) $('modChooserPath189').textContent = chooserText('1.8.9');
 
   document.querySelectorAll('[data-content-provider]').forEach((button) => {
     const active = button.dataset.contentProvider === contentProvider;
@@ -1205,7 +1209,7 @@ function syncScaleUi(scale) {
 }
 
 function fillSettings() {
-  ['minRamGb', 'maxRamGb', 'java25Path', 'java21Path', 'width', 'height'].forEach((id) => {
+  ['minRamGb', 'maxRamGb', 'java25Path', 'java21Path', 'java8Path', 'width', 'height'].forEach((id) => {
     $(id).value = settings?.[id] ?? '';
   });
   $('fullscreen').checked = Boolean(settings?.fullscreen);
@@ -1223,12 +1227,15 @@ function renderPlatformPaths() {
   const path26 = byVersion['26.2']?.modsDirectory || 'SpectorClient data/instances/26.2/mods';
   const path263 = byVersion['26.3']?.modsDirectory || 'SpectorClient data/instances/26.3/mods';
   const path12111 = byVersion['1.21.11']?.modsDirectory || 'SpectorClient data/instances/1.21.11/mods';
+  const path189 = byVersion['1.8.9']?.modsDirectory || 'SpectorClient data/instances/1.8.9/mods';
   if ($('versionModsPath26')) $('versionModsPath26').textContent = path26;
   if ($('versionModsPath263')) $('versionModsPath263').textContent = path263;
   if ($('versionModsPath12111')) $('versionModsPath12111').textContent = path12111;
+  if ($('versionModsPath189')) $('versionModsPath189').textContent = path189;
   if ($('modChooserPath26')) $('modChooserPath26').textContent = 'Fabric • Minecraft 26.2';
   if ($('modChooserPath263')) $('modChooserPath263').textContent = 'Fabric • Minecraft 26.3';
   if ($('modChooserPath12111')) $('modChooserPath12111').textContent = 'Fabric • Minecraft 1.21.11';
+  if ($('modChooserPath189')) $('modChooserPath189').textContent = 'Forge • Minecraft 1.8.9';
 }
 
 function collectSettings() {
@@ -1239,6 +1246,7 @@ function collectSettings() {
     maxRamGb: Number($('maxRamGb').value),
     java25Path: $('java25Path').value.trim(),
     java21Path: $('java21Path').value.trim(),
+    java8Path: $('java8Path').value.trim(),
     width: Number($('width').value),
     height: Number($('height').value),
     fullscreen: $('fullscreen').checked,
@@ -1882,10 +1890,16 @@ $('chooseJava21Btn').addEventListener('click', async () => {
   const selected = await window.launcher.chooseJava(21);
   if (selected) $('java21Path').value = selected;
 });
+$('chooseJava8Btn').addEventListener('click', async () => {
+  const selected = await window.launcher.chooseJava(8);
+  if (selected) $('java8Path').value = selected;
+});
 $('installJava25Btn').addEventListener('click', () => runJavaAction(25, 'install', $('installJava25Btn')));
 $('repairJava25Btn').addEventListener('click', () => runJavaAction(25, 'repair', $('repairJava25Btn')));
 $('installJava21Btn').addEventListener('click', () => runJavaAction(21, 'install', $('installJava21Btn')));
 $('repairJava21Btn').addEventListener('click', () => runJavaAction(21, 'repair', $('repairJava21Btn')));
+$('installJava8Btn').addEventListener('click', () => runJavaAction(8, 'install', $('installJava8Btn')));
+$('repairJava8Btn').addEventListener('click', () => runJavaAction(8, 'repair', $('repairJava8Btn')));
 $('openClientFolderBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('openFolderRailBtn').addEventListener('click', () => window.launcher.openClientFolder());
 $('clearLogsBtn').addEventListener('click', async () => { await window.launcher.clearLogs(); });

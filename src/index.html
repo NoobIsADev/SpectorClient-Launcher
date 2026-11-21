@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="refinements-v1650.css" />
   <link rel="stylesheet" href="refinements-v1651.css" />
   <link rel="stylesheet" href="refinements-v1658.css" />
+  <link rel="stylesheet" href="refinements-v1659.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -121,6 +122,11 @@
             <div class="client-version-copy"><h3>1.21.11</h3></div>
             <div class="client-version-actions"><button class="version-action-btn version-use-btn" type="button" data-version-use="1.21.11">Use version</button><button class="version-action-btn version-content-btn" type="button" data-version-content="1.21.11">Manage mods</button></div>
           </article>
+          <article class="client-version-card" data-game-version="1.8.9">
+            <div class="version-tile-top"><div class="client-version-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M7 4v6M17 4v6M5 11h14v9H5z"/><path d="M8 15h8"/></svg></div><span class="version-tile-tag">FORGE</span></div>
+            <div class="client-version-copy"><h3>1.8.9</h3></div>
+            <div class="client-version-actions"><button class="version-action-btn version-use-btn" type="button" data-version-use="1.8.9">Use version</button><button class="version-action-btn version-content-btn" type="button" data-version-content="1.8.9">Manage mods</button></div>
+          </article>
         </div>
       </section>
 
@@ -149,6 +155,7 @@
             <button class="mod-version-card" data-mod-game-version="26.3" type="button"><span class="mod-version-symbol">26</span><b>SpectorClient 26.3</b><span id="modChooserPath263">Fabric • Minecraft 26.3</span><span class="mod-version-go">Choose</span></button>
             <button class="mod-version-card" data-mod-game-version="26.2" type="button"><span class="mod-version-symbol">26</span><b>SpectorClient 26.2</b><span id="modChooserPath26">Fabric • Minecraft 26.2</span><span class="mod-version-go">Choose</span></button>
             <button class="mod-version-card" data-mod-game-version="1.21.11" type="button"><span class="mod-version-symbol">21</span><b>SpectorClient 1.21.11</b><span id="modChooserPath12111">Fabric • Minecraft 1.21.11</span><span class="mod-version-go">Choose</span></button>
+            <button class="mod-version-card" data-mod-game-version="1.8.9" type="button"><span class="mod-version-symbol">1.8</span><b>SpectorClient 1.8.9</b><span id="modChooserPath189">Forge • Minecraft 1.8.9</span><span class="mod-version-go">Choose</span></button>
           </div>
         </div>
         <div id="modManagerContent" class="hidden">
@@ -371,6 +378,9 @@
             <label style="margin-top:14px;display:block">Java 21 executable — SpectorClient 1.21.11</label>
             <div class="field-action java-field-action"><input id="java21Path" placeholder="Automatic: managed Java 21" /><button id="chooseJava21Btn" class="secondary-btn">Browse</button><button id="installJava21Btn" class="secondary-btn java-install-btn">Install</button><button id="repairJava21Btn" class="secondary-btn java-repair-btn">Repair</button></div>
             <p class="hint">1.21.11 automatically downloads and uses a separate verified Java 21 runtime. Repair fully removes SpectorClient's managed runtime and downloads a fresh verified copy.</p>
+            <label style="margin-top:14px;display:block">Java 8 executable — SpectorClient 1.8.9 Forge</label>
+            <div class="field-action java-field-action"><input id="java8Path" placeholder="Automatic: managed Java 8" /><button id="chooseJava8Btn" class="secondary-btn">Browse</button><button id="installJava8Btn" class="secondary-btn java-install-btn">Install</button><button id="repairJava8Btn" class="secondary-btn java-repair-btn">Repair</button></div>
+            <p class="hint">Minecraft 1.8.9 runs Forge 11.15.1.2318 on a separate managed Java 8 runtime. Fabric API is not installed for this version.</p>
           </div>
 
           <div class="setting-card full-card">
@@ -392,8 +402,8 @@
           <div class="setting-card">
             <h3>Fixed client stack</h3>
             <div class="stack-row"><span>Selected Minecraft</span><b id="settingsSelectedVersion">26.2</b></div>
-            <div class="stack-row"><span>Loader</span><b>Fabric</b></div>
-            <div class="stack-row"><span>Fabric API</span><b>Automatic</b></div>
+            <div class="stack-row"><span>Loader</span><b id="settingsLoader">Fabric</b></div>
+            <div class="stack-row"><span>Loader support</span><b id="settingsLoaderSupport">Fabric API automatic</b></div>
           </div>
         </div>
       </section>

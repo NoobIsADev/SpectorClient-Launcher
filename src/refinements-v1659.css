@@ -1,0 +1,11 @@
+/* v1.6.59: four version editions, same SpectorClient charcoal/cyan visual system. */
+.version-select-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mod-version-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.client-version-card { min-width: 0; }
+.mod-version-card { min-width: 0; }
+@media (max-width: 1320px) {
+  .version-select-grid, .mod-version-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .version-select-grid, .mod-version-grid { grid-template-columns: minmax(0, 1fr); }
+}

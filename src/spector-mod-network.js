@@ -128,7 +128,7 @@ async function streamOneDownload(sourceUrl, tempPath, {
   throw new Error('Too many SpectorClient mod redirects.');
 }
 
-async function verifyFabricJar(file) {
+async function verifyModJar(file, loader = 'fabric') {
   const stat = await fsp.stat(file);
   if (stat.size > MAX_MOD_BYTES) {
     throw new Error('SpectorClient mod JAR is unexpectedly large.');
@@ -159,6 +159,8 @@ async function verifyFabricJar(file) {
   }
   let pos = centralOffset;
   let foundModJson = false;
+  let foundForgeDescriptor = false;
+  let foundClass = false;
   for (let entry = 0; entry < count; entry += 1) {
     if (pos + 46 > end || data.readUInt32LE(pos) !== 0x02014b50) {
       throw Object.assign(new Error('SpectorClient mod JAR contains invalid ZIP entries.'), { retryable: true });
@@ -172,13 +174,28 @@ async function verifyFabricJar(file) {
     }
     const name = data.toString('utf8', pos + 46, pos + 46 + nameLen);
     if (name === 'fabric.mod.json') foundModJson = true;
+    if (name === 'mcmod.info' || name === 'META-INF/MANIFEST.MF') foundForgeDescriptor = true;
+    if (name.endsWith('.class')) foundClass = true;
     pos = next;
   }
-  if (pos !== end || !foundModJson) {
+  if (pos !== end) {
+    throw Object.assign(new Error('Downloaded JAR contains inconsistent ZIP entries.'), { retryable: true });
+  }
+  if (loader === 'forge') {
+    // Forge 1.8.9 mod jars have compiled classes, generally mcmod.info and/or
+    // a manifest. Do not accept Fabric-only mods under the legacy Forge profile.
+    if (!foundClass || (!foundForgeDescriptor && foundModJson)) {
+      throw Object.assign(new Error('Downloaded archive is not a compatible Forge mod JAR.'), { retryable: true });
+    }
+  } else if (!foundModJson) {
     throw Object.assign(new Error('Downloaded archive does not contain a Fabric mod (fabric.mod.json missing).'), { retryable: true });
   }
   return { bytes: data.length };
 }
+
+async function verifyFabricJar(file) { return verifyModJar(file, 'fabric'); }
+async function verifyForgeJar(file) { return verifyModJar(file, 'forge'); }
+
 
 async function downloadSpectorJar(url, destination, {
   attempts = 3,
@@ -188,7 +205,8 @@ async function downloadSpectorJar(url, destination, {
   onProgress = () => {},
   onRetry = () => {},
   headerTimeoutMs = 25000,
-  idleTimeoutMs = 60000
+  idleTimeoutMs = 60000,
+  loader = 'fabric'
 } = {}) {
   requireHttpsUrl(url);
   const count = Math.max(1, Math.min(5, Math.floor(attempts) || 3));
@@ -202,7 +220,7 @@ async function downloadSpectorJar(url, destination, {
         get, userAgent, headerTimeoutMs, idleTimeoutMs,
         onProgress: percent => onProgress({ attempt, attempts: count, percent })
       });
-      const verification = await verifyFabricJar(staged);
+      const verification = await verifyModJar(staged, loader);
       keepStaged = true;
       return { path: staged, attempt, ...result, ...verification };
     } catch (error) {
@@ -223,8 +241,8 @@ async function downloadSpectorJar(url, destination, {
 
 // Swap a verified new JAR into place without deleting the last working mod
 // before the replacement is safely on disk. A failed move restores the backup.
-async function installVerifiedSpectorJar(staged, destination, { legacyFiles = [] } = {}) {
-  await verifyFabricJar(staged);
+async function installVerifiedSpectorJar(staged, destination, { legacyFiles = [], loader = 'fabric' } = {}) {
+  await verifyModJar(staged, loader);
   const backup = `${destination}.pre-update-${crypto.randomUUID()}.bak`;
   const exists = await fsp.stat(destination).then(() => true).catch(error => {
     if (error.code === 'ENOENT') return false;
@@ -251,4 +269,4 @@ async function installVerifiedSpectorJar(staged, destination, { legacyFiles = []
   return destination;
 }
 
-module.exports = { downloadSpectorJar, verifyFabricJar, isRetryableModError, installVerifiedSpectorJar };
+module.exports = { downloadSpectorJar, verifyFabricJar, verifyForgeJar, verifyModJar, isRetryableModError, installVerifiedSpectorJar };

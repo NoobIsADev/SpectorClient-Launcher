@@ -1,3 +1,16 @@
+# SpectorClient Launcher v1.6.59 — Minecraft 1.8.9 Forge support
+
+- Added an independent **Minecraft 1.8.9** edition to the Play version selector, Versions cards, and Mods version chooser; older editions (1.21.11, 26.2, 26.3) continue to use Fabric unchanged.
+- **Minecraft 1.8.9 uses Forge 11.15.1.2318**, the newest Forge release officially listed for Minecraft 1.8.9. The launch engine requires Forge's **universal** JAR; it is fetched from Forge's official Maven repository and verified against the published SHA-1 (`beda619c465af293e63952dd573c137c17c0a4cd`) before installation.
+- The actual Play handler selects a separate managed **Java 8** runtime or an explicitly configured Java 8 executable. The launcher retains the existing RAM allocation, game process tracking, Microsoft session, logs, and existing Java 21/25 launch behavior for newer editions.
+- The version-specific SpectorClient mod comes from `https://spectorclient.com/mod/download/legacy`; Forge JAR validation is used rather than requiring `fabric.mod.json`.
+- **No Fabric API download or installation occurs for Minecraft 1.8.9**, including launch preparation, opening Content, searching, installing mods, and the background API refresh. The existing Fabric API behavior is retained for 1.21.11, 26.2 and 26.3.
+- Modrinth and CurseForge mod searches and install choices are filtered by **Forge and Minecraft 1.8.9**; resource packs and shaders still use their appropriate type/version filters. 1.8.9 mods and Forge configuration are isolated from other Minecraft instances; Minecraft's older `options.txt` is not shared with newer editions.
+- `scripts/verify-v1659.js` provides offline regression coverage for Forge JAR integrity, legacy mod download, Java 8, actual Play/Stop tracking, and Forge/1.8.9 content filters. Run `npm run verify:ui` to execute all available tests. Native Java 8/Forge gameplay and the live legacy mod endpoint still need real-world verification.
+- Complete original v1.6.58 source is preserved in Google Drive for rollback; do not overwrite an existing GitHub release tag.
+
+---
+
 ## v1.6.58 — Unified Logs interface (Electron only)
 
 - Restyled the detached Logs window to match the black/charcoal launcher with theme-aware cyan/Crimson/Prince/Pink accents.
@@ -141,7 +154,7 @@ The original logo is downloaded by `scripts/fetch-brand.js` on first setup; the 
 
 ## Publish
 
-After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.57`) and will refuse to reuse an existing GitHub tag.
+After previewing the app, run `PUSH-AND-RELEASE.bat` on Windows. It uses the version in `package.json` (`v1.6.59`) and will refuse to reuse an existing GitHub tag.
 
 ## Rollback
 

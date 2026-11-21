@@ -1,3 +1,11 @@
+# Roll back SpectorClient Launcher v1.6.59 (Forge 1.8.9)
+
+The complete untouched previous version is `SpectorClient-Launcher-v1.6.58-Logs-Redesign-Full-Source.zip`, already saved on Google Drive. Use that archive to restore the previous three-edition launcher. Do **not** delete `APPDATA/spectorclient` or your version-specific `instances/1.8.9` data when switching source builds; remove only application binaries or source code if reverting. You can also switch among versions from the updated launcher without losing instance files.
+
+The Forge 1.8.9 code is isolated in `src/legacy-forge.js`; the other changes add a fourth selectable edition, Java 8 runtime management, and Forge-filtered content search. For a subsequent published rollback, use a new patch version rather than reusing a GitHub tag.
+
+---
+
 ## Rollback from v1.6.58
 
 The exact, complete v1.6.57 Electron source is kept as `SpectorClient-Launcher-v1.6.57-ROLLBACK-BACKUP.zip`. Restore that ZIP to revert the Logs presentation. Game processes, accounts, mods, and settings were not migrated or altered.

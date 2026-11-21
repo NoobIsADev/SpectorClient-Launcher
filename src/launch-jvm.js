@@ -6,7 +6,7 @@
 // -XX flags in customLaunchArgs and never spawn a second, untracked process.
 
 const MIN_STACK_SHADOW_PAGES_263 = 32;
-const SUPPORTED_VERSIONS = new Set(['1.21.11', '26.2', '26.3']);
+const SUPPORTED_VERSIONS = new Set(['1.8.9', '1.21.11', '26.2', '26.3']);
 const STACK_SHADOW_OPTION = /^-XX:StackShadowPages(?:=(.*))?$/;
 const JVM_BOUNDARIES = new Set(['-cp', '-classpath', '--class-path', '-jar', '-m', '--module']);
 const JVM_FIELDS = ['customArgs', 'jvmArgs', 'jvmArguments', 'javaArgs', 'javaArguments', 'customJvmArgs', 'customJavaArgs'];
@@ -28,7 +28,7 @@ function minecraftVersion(value) {
   if (SUPPORTED_VERSIONS.has(candidate)) return candidate;
   // Compatibility with human-readable selections saved by older launchers.
   // Do not classify arbitrary names containing a version somewhere in them.
-  const match = /^SpectorClient\s+(1\.21\.11|26\.2|26\.3)$/i.exec(candidate);
+  const match = /^SpectorClient\s+(1\.8\.9|1\.21\.11|26\.2|26\.3)$/i.exec(candidate);
   return match ? match[1] : candidate;
 }
 
