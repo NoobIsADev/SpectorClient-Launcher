@@ -14,7 +14,7 @@ assert(html.includes('<link rel="stylesheet" href="styles.css" />'), 'Original C
 assert(html.includes('<link rel="stylesheet" href="overhaul.css" />'), 'Overhaul CSS must load after old CSS');
 assert(fs.existsSync(path.join(root, 'ROLLBACK.md')), 'Revert documentation must be present');
 const nav = [...html.matchAll(/class="rail-btn[^\"]*"\s+data-view="([^\"]+)"/g)].map(x => x[1]);
-assert.deepEqual(nav, patch >= 45
+assert.deepEqual(nav, patch >= 60 ? ['home', 'mods', 'accounts', 'settings'] : patch >= 45
   ? ['home', 'versions', 'mods', 'accounts', 'settings']
   : ['home', 'mods', 'versions', 'accounts', 'cosmetics', 'settings']);
 for (const disallowed of ['Chat', 'Clips', 'Character', 'Servers']) {
@@ -28,7 +28,7 @@ assert(!html.includes('notification-center'), 'Notification Center must remain r
 for (const id of [
   'minimizeBtn', 'maximizeBtn', 'closeBtn', 'accountSwitcher', 'topAccountName',
   'playBtn',
-  'versionBtn', 'status', 'view-home', 'view-mods', 'view-versions', 'view-accounts',
+  'versionBtn', 'status', 'view-home', 'view-mods', 'view-accounts',
   'view-cosmetics', 'view-settings', 'view-logs', 'socialMain', 'socialHome',
   'socialFriendsList', 'socialRequestsList', 'socialChat', 'openFolderRailBtn',
   'openClientFolderBtn', 'cosmeticsSkinFile', 'applyCosmeticsSkinBtn',

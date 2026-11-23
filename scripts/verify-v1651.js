@@ -15,8 +15,8 @@ assert(!/class="(?:top-brand-logo|brand-logo-img|rail-logo)"/.test(html), 'Remov
 assert(/<div class="client-title" aria-label="SpectorClient">[\s\S]*?<span class="client-title-main">Spector<\/span><span class="client-title-accent">Client<\/span>/.test(html), 'Keep header wordmark readable and text-only');
 assert(/\.topbar\s*\{[^}]*padding-left:\s*12px/.test(css), 'Text must shift into former icon footprint');
 assert(/\.client-title\s*\{[^}]*padding:\s*0\s*!important/.test(css), 'Remove leftover text inset');
-assert(html.includes('class="version-featured-logo"'), 'Preserve featured-version logo on Versions screen');
-for(const id of ['accountSwitcher','friendsPanelToggle','minimizeBtn','maximizeBtn','closeBtn','versionBtn','changeModVersionBtn','playBtn','modManagerContent','view-home','view-mods','view-versions','view-settings']) {
+if (Number(pkg.version.split('.')[2]) < 60) assert(html.includes('class="version-featured-logo"'), 'Preserve featured-version logo on Versions screen');
+for(const id of ['accountSwitcher','friendsPanelToggle','minimizeBtn','maximizeBtn','closeBtn','versionBtn','changeModVersionBtn','playBtn','modManagerContent','view-home','view-mods','view-settings']) {
  assert(html.includes('id="'+id+'"'), 'Functional control missing: '+id);
 }
 assert(js.includes('renderPlayer()') && js.includes('changeModVersionBtn'), 'Preserve player preview and mod version logic');

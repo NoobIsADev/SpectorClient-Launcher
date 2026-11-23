@@ -23,7 +23,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
 const ui = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
-assert.equal(pkg.version, '1.6.59');
+assert(Number(pkg.version.split('.')[2]) >= 59, 'Forge baseline persists');
 assert(pkg.scripts['verify:ui'].includes('verify-v1659.js'));
 assert.equal(FORGE_VERSION, '11.15.1.2318');
 assert(/^[a-f0-9]{40}$/.test(FORGE_UNIVERSAL_SHA1));
@@ -36,14 +36,19 @@ assert(main.includes("forge: preparedClient.forgePath"));
 assert(main.includes('isFabricClient(gameVersion)'));
 assert(main.includes("selectedGameVersion === '1.8.9' ? 'legacy' : 'multiplayer'"));
 assert(main.includes("gameVersion === '1.8.9' && entryName === 'options.txt'"));
-for (const v of ['26.2', '26.3', '1.21.11', '1.8.9']) {
-  assert(html.includes(`data-game-version="${v}"`));
-  assert(html.includes(`data-mod-game-version="${v}"`));
+if (Number(pkg.version.split('.')[2]) < 60) {
+  for (const v of ['26.2', '26.3', '1.21.11', '1.8.9']) {
+    assert(html.includes(`data-game-version="${v}"`));
+    assert(html.includes(`data-mod-game-version="${v}"`));
+  }
+} else {
+  assert(html.includes('id="playVersionMenu"') && html.includes('id="modsVersionMenu"'));
+  assert(ui.includes("['26.2', '26.3', '1.21.11', '1.8.9']"));
 }
-for (const id of ['java8Path', 'chooseJava8Btn', 'installJava8Btn', 'repairJava8Btn', 'modChooserPath189', 'settingsLoader']) {
+for (const id of ['java8Path', 'chooseJava8Btn', 'installJava8Btn', 'repairJava8Btn', 'settingsLoader']) {
   assert(html.includes(`id="${id}"`), `Missing ${id}`);
 }
-assert(ui.includes("chooserText('1.8.9')"));
+assert(ui.includes("chooserText('1.8.9')") || ui.includes('versionLoaderLabel(gameVersion)'), 'Legacy Forge selector remains available');
 assert(ui.includes('window.launcher.chooseJava(8)'));
 assert(ui.includes("runJavaAction(8, 'repair'"));
 // Validate actual Java major parsing, not just the Play-handler mock.

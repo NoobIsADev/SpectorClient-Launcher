@@ -36,7 +36,7 @@ assert(settingsSvg, 'Settings navigation must remain');
 assert(settingsSvg.includes('M10.4 2.5h3.2') && settingsSvg.includes('<circle cx="12" cy="12" r="3.2"'), 'Use a recognizable toothed gear with a central opening');
 assert(!html.includes('data-view="cosmetics"'), 'Do not restore separate Skins management UI');
 assert(html.includes('id="view-cosmetics"'), 'Preserve old cosmetics backend and rollback source');
-for (const id of ['view-home','view-mods','view-versions','view-settings','view-accounts','accountSwitcher','socialChat','socialMessages','playBtn']) {
+for (const id of ['view-home','view-mods','view-settings','view-accounts','accountSwitcher','socialChat','socialMessages','playBtn']) {
   assert(html.includes(`id="${id}"`), `Original launcher feature must remain: ${id}`);
 }
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);

@@ -260,6 +260,103 @@ function gameVersionDetails(gameVersion) {
   };
 }
 
+// v1.6.60: inline version switchers. The Play and Content menus share the
+// supported-version source, but select independent targets. No Versions page.
+const versionMenuConfig = Object.freeze({
+  play: { triggerId: 'versionBtn', menuId: 'playVersionMenu' },
+  mods: { triggerId: 'changeModVersionBtn', menuId: 'modsVersionMenu' }
+});
+
+function versionMenuOpen(kind) {
+  const menuId = versionMenuConfig[kind]?.menuId;
+  return Boolean(menuId && $(menuId) && !$(menuId).classList.contains('hidden'));
+}
+
+function closeVersionDropdowns(restoreFocus = false) {
+  for (const { triggerId, menuId } of Object.values(versionMenuConfig)) {
+    const trigger = $(triggerId);
+    const menu = $(menuId);
+    if (!menu || !trigger) continue;
+    const wasOpen = !menu.classList.contains('hidden');
+    menu.classList.add('hidden');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen) trigger.focus();
+  }
+}
+
+function versionLoaderLabel(gameVersion) {
+  const loader = gameVersionDetails(gameVersion)?.loader;
+  return loader === 'forge' || gameVersion === '1.8.9' ? 'Forge' : 'Fabric';
+}
+
+function renderVersionDropdowns() {
+  const versions = supportedGameVersions();
+  for (const [kind, { triggerId, menuId }] of Object.entries(versionMenuConfig)) {
+    const menu = $(menuId);
+    const trigger = $(triggerId);
+    if (!menu || !trigger) continue;
+    const selected = kind === 'play' ? selectedGameVersion() : (modsTargetVersion || selectedGameVersion());
+    menu.replaceChildren();
+    for (const version of versions) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'version-dropdown-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(version === selected));
+      option.dataset.dropdownVersion = version;
+      option.dataset.versionMenuKind = kind;
+      if (version === selected) option.classList.add('active');
+      const name = document.createElement('span');
+      name.className = 'version-option-name';
+      name.textContent = version;
+      const loader = document.createElement('small');
+      loader.className = 'version-option-loader';
+      loader.textContent = versionLoaderLabel(version);
+      option.append(name, loader);
+      menu.append(option);
+    }
+  }
+}
+
+function toggleVersionDropdown(kind, force) {
+  const cfg = versionMenuConfig[kind];
+  if (!cfg) return;
+  const wasOpen = versionMenuOpen(kind);
+  closeVersionDropdowns();
+  const open = typeof force === 'boolean' ? force : !wasOpen;
+  if (!open) return;
+  renderVersionDropdowns();
+  $(cfg.menuId).classList.remove('hidden');
+  $(cfg.triggerId).setAttribute('aria-expanded', 'true');
+}
+
+async function applyVersionDropdownSelection(kind, version) {
+  if (!supportedGameVersions().includes(version)) return;
+  closeVersionDropdowns(true);
+  if (kind === 'play') {
+    const previous = settings.selectedGameVersion;
+    if (version === selectedGameVersion()) return;
+    try {
+      settings.selectedGameVersion = version;
+      settings = await window.launcher.saveSettings(collectSettings());
+      renderSelectedVersionUI();
+      showToast(`Using SpectorClient ${version}.`);
+    } catch (error) {
+      settings.selectedGameVersion = previous;
+      renderSelectedVersionUI();
+      showToast(`Could not change Minecraft version: ${error.message}`, 4600);
+    }
+  } else if (kind === 'mods') {
+    if (version === modsTargetVersion) return;
+    try {
+      await selectModsVersion(version);
+    } catch (error) {
+      if ($('modManagerStatus')) $('modManagerStatus').textContent = `Could not load version: ${error.message}`;
+      showToast(`Could not load ${version} content: ${error.message}`, 4600);
+    }
+  }
+}
+
 function renderSelectedVersionUI() {
   const gameVersion = selectedGameVersion();
   if ($('selectedVersionLabel')) $('selectedVersionLabel').textContent = gameVersion;
@@ -267,17 +364,8 @@ function renderSelectedVersionUI() {
   const loader = gameVersionDetails(gameVersion)?.loader || (gameVersion === '1.8.9' ? 'forge' : 'fabric');
   if ($('settingsLoader')) $('settingsLoader').textContent = loader === 'forge' ? 'Forge' : 'Fabric';
   if ($('settingsLoaderSupport')) $('settingsLoaderSupport').textContent = loader === 'forge' ? 'Forge 11.15.1.2318 • Java 8' : 'Fabric API automatic';
-  if ($('versionActiveName')) $('versionActiveName').textContent = `SpectorClient ${gameVersion}`;
   if ($('homeFeaturedVersion')) $('homeFeaturedVersion').textContent = `MINECRAFT ${gameVersion}`;
-  document.querySelectorAll('[data-game-version]').forEach((card) => {
-    card.classList.toggle('selected', card.dataset.gameVersion === gameVersion);
-  });
-  document.querySelectorAll('[data-version-use]').forEach((button) => {
-    const active = normalizeGameVersion(button.dataset.versionUse) === gameVersion;
-    button.disabled = active;
-    button.textContent = active ? 'Using' : 'Use';
-    button.setAttribute('aria-pressed', active ? 'true' : 'false');
-  });
+  renderVersionDropdowns();
   updatePlayState();
 }
 
@@ -391,10 +479,10 @@ function resetModsVersionSelection() {
   modSearchTotalPages = 1;
   modSearchTotal = 0;
   modSearchQuery = '';
-  $('modVersionChooser')?.classList.remove('hidden');
-  $('modManagerContent')?.classList.add('hidden');
+  $('modManagerContent')?.classList.remove('hidden');
+  renderVersionDropdowns();
   if ($('openModsFolderBtn')) $('openModsFolderBtn').disabled = true;
-  if ($('modsDescription')) $('modsDescription').textContent = `Select a SpectorClient version to browse ${contentUi().label.toLowerCase()} from Modrinth or CurseForge.`;
+  if ($('modsDescription')) $('modsDescription').textContent = `Browse ${contentUi().label.toLowerCase()} for Minecraft ${selectedGameVersion()}.`;
   syncContentUiLabels();
   if ($('installedTabCount')) $('installedTabCount').textContent = '0';
   if ($('modSearchInput')) $('modSearchInput').value = '';
@@ -413,16 +501,15 @@ async function selectModsVersion(gameVersion) {
   modSearchTotalPages = 1;
   modSearchTotal = 0;
   modSearchQuery = '';
-  $('modVersionChooser')?.classList.add('hidden');
   $('modManagerContent')?.classList.remove('hidden');
+  renderVersionDropdowns();
   $('openModsFolderBtn').disabled = false;
   $('modSelectedVersionLabel').textContent = globalContent
     ? `Global ${meta.label}`
     : (details.label || `SpectorClient ${modsTargetVersion}`);
-  if ($('changeModVersionBtn')) $('changeModVersionBtn').textContent = 'Change version';
   $('modsDescription').innerHTML = globalContent
-    ? `<b>${escapeHtml(meta.label)}</b> are shared across every SpectorClient version. Compatibility filter: <b>Minecraft ${escapeHtml(modsTargetVersion)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`
-    : `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b>. Folder: <code>${escapeHtml(contentFolderForVersion(modsTargetVersion))}</code>`;
+    ? `<b>${escapeHtml(meta.label)}</b> are shared across versions. Browsing Minecraft <b>${escapeHtml(modsTargetVersion)}</b> compatible downloads.`
+    : `Managing <b>${escapeHtml(meta.label)}</b> for <b>${escapeHtml(details.label || `SpectorClient ${modsTargetVersion}`)}</b> (${versionLoaderLabel(modsTargetVersion)}).`;
   $('modSearchInput').placeholder = `Search ${providerName()} for Minecraft ${modsTargetVersion} ${meta.label.toLowerCase()}...`;
   if ($('modBrowseSubtitle')) $('modBrowseSubtitle').textContent = '';
   $('modManagerStatus').textContent = `Loading installed ${meta.label.toLowerCase()}…`;
@@ -714,15 +801,16 @@ async function syncSocialConnection(force = false) {
 }
 
 function showView(name, options = {}) {
+  if (name === 'versions') name = 'home'; // no separate Versions page in v1.6.60
+  if (name === 'cosmetics') name = 'accounts';
+  closeVersionDropdowns();
+  if (!$(`view-${name}`)) return;
   document.querySelectorAll('.view').forEach((view) => view.classList.remove('active'));
   document.querySelectorAll('.rail-btn[data-view]').forEach((button) => {
     button.classList.remove('active');
     button.removeAttribute('aria-current');
   });
-  // The legacy Minecraft Skins screen is archived in source, not part of the launcher UI.
-  if (name === 'cosmetics') name = 'accounts';
   const view = $(`view-${name}`);
-  if (!view) return;
   closeResponsiveSocialPanel();
   view.classList.add('active');
   const nav = document.querySelector(`.rail-btn[data-view="${name}"]`);
@@ -730,8 +818,8 @@ function showView(name, options = {}) {
   $('accountDropdown').classList.add('hidden');
 
   if (name === 'mods') {
-    // Default Content to the Home/Play version, but allow direct version-card links
-    // to open Content for a different version without changing the Play version.
+    // Default Content to the Play version. The Mods dropdown can target another
+    // version without modifying the selected Play version.
     const targetVersion = normalizeGameVersion(options.modsVersion || selectedGameVersion());
     resetModsVersionSelection();
     void selectModsVersion(targetVersion).catch((error) => {
@@ -1591,7 +1679,7 @@ async function searchMods(query = $('modSearchInput').value, page = 1, resetOnQu
   $('modManagerStatus').textContent = q
     ? `Searching ${providerName()} for “${q}” — page ${modSearchPage}…`
     : `Loading popular ${meta.label.toLowerCase()} from ${providerName()} for ${modsTargetVersion} — page ${modSearchPage}…`;
-  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading ${providerName()}…</b><span>Filtering for Minecraft ${escapeHtml(modsTargetVersion)}${meta.fabric ? ' + Fabric' : ''}.</span></div></div>`;
+  $('modSearchResults').innerHTML = `<div class="empty-state compact-empty"><div><b>Loading ${providerName()}…</b><span>Filtering for Minecraft ${escapeHtml(modsTargetVersion)}${meta.fabric ? ` + ${versionLoaderLabel(modsTargetVersion)}` : ''}.</span></div></div>`;
   $('modPagination').classList.add('hidden');
   try {
     const result = await window.launcher.searchContent(modsTargetVersion, activeContentType, contentProvider, q, modSearchPage);
@@ -1705,24 +1793,54 @@ window.launcher.onUiScale((data) => {
   }
 });
 
-// Home
-$('versionBtn').addEventListener('click', () => showView('versions'));
-$('versionBackBtn').addEventListener('click', () => showView('home'));
-document.querySelectorAll('[data-version-use]').forEach((button) => {
-  button.addEventListener('click', async () => {
-    settings.selectedGameVersion = normalizeGameVersion(button.dataset.versionUse);
-    settings = await window.launcher.saveSettings(collectSettings());
-    renderSelectedVersionUI();
-    showView('home');
-    showToast(`Using SpectorClient ${settings.selectedGameVersion}.`);
+// v1.6.60: dropdowns on the Play version button and Mods Change version button.
+for (const [kind, { triggerId }] of Object.entries(versionMenuConfig)) {
+  $(triggerId).addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleVersionDropdown(kind);
   });
-});
-document.querySelectorAll('[data-version-content]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const gameVersion = normalizeGameVersion(button.dataset.versionContent);
-    showView('mods', { modsVersion: gameVersion });
+}
+for (const [kind, { menuId }] of Object.entries(versionMenuConfig)) {
+  $(menuId).addEventListener('click', (event) => {
+    const option = event.target.closest('[data-dropdown-version]');
+    if (!option) return;
+    event.stopPropagation();
+    void applyVersionDropdownSelection(kind, option.dataset.dropdownVersion);
   });
+}
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.version-picker-wrap')) closeVersionDropdowns();
 });
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { closeVersionDropdowns(true); return; }
+  for (const [kind, { triggerId, menuId }] of Object.entries(versionMenuConfig)) {
+    const trigger = $(triggerId);
+    const menu = $(menuId);
+    if (!trigger || !menu) continue;
+    const focused = document.activeElement;
+    const inPicker = trigger === focused || menu.contains(focused);
+    if (!inPicker) continue;
+    if (!versionMenuOpen(kind) && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault();
+      toggleVersionDropdown(kind, true);
+      const options = [...menu.querySelectorAll('[data-dropdown-version]')];
+      (event.key === 'ArrowUp' ? options.at(-1) : options[0])?.focus();
+      return;
+    }
+    if (!versionMenuOpen(kind)) continue;
+    const options = [...menu.querySelectorAll('[data-dropdown-version]')];
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      let index = options.indexOf(focused);
+      if (event.key === 'Home') index = 0;
+      else if (event.key === 'End') index = options.length - 1;
+      else index = (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+      options[index]?.focus();
+      return;
+    }
+  }
+});
+
 $('playBtn').addEventListener('click', async () => {
   if (gameRunning) {
     try {
@@ -1759,10 +1877,6 @@ $('closeAuthModalBtn').addEventListener('click', () => $('authModal').classList.
 $('openAuthLinkBtn').addEventListener('click', () => currentAuthUrl && window.launcher.openExternal(currentAuthUrl));
 
 // Mods
-document.querySelectorAll('[data-mod-game-version]').forEach((button) => {
-  button.addEventListener('click', () => selectModsVersion(button.dataset.modGameVersion));
-});
-$('changeModVersionBtn').addEventListener('click', resetModsVersionSelection);
 document.querySelectorAll('[data-mod-tab]').forEach((button) => {
   button.addEventListener('click', () => setModTab(button.dataset.modTab));
 });
@@ -2330,7 +2444,7 @@ async function ensureNotificationPermission() {
     if (Array.isArray(logHistory) && logHistory.length) {
       $('logOutput').textContent = logHistory.map((entry) => `[${entry.type || 'launcher'}] ${entry.line || ''}`).join('\n') + '\n';
     }
-    resetModsVersionSelection();
+    renderVersionDropdowns();
     // Ask Chromium/Electron for notification permission where the OS exposes a
     // request flow. Linux native notifications work through the desktop server.
     ensureNotificationPermission();

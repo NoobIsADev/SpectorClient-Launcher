@@ -36,7 +36,9 @@ for (const match of html.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)) {
   assert(!forbidden.test(match[0]), `Remove decorative arrow from button: ${match[0].slice(0,110)}`);
 }
 assert(!renderer.includes('Equip cape →'), 'Cape action should not show decorative arrow');
-for (const required of ['data-version-use="26.3"','data-version-use="26.2"','data-version-use="1.21.11"', 'data-version-content="26.3"','data-mod-game-version="26.3"','id="socialChat"','id="playBtn"']) {
+for (const required of Number(pkg.version.split('.')[2]) >= 60
+  ? ['id="playVersionMenu"','id="modsVersionMenu"','id="socialChat"','id="playBtn"']
+  : ['data-version-use="26.3"','data-version-use="26.2"','data-version-use="1.21.11"', 'data-version-content="26.3"','data-mod-game-version="26.3"','id="socialChat"','id="playBtn"']) {
   assert(html.includes(required), `Must preserve original function ${required}`);
 }
 assert(pkg.scripts['verify:ui'].includes('verify-v1648.js'), 'Previous suite stays in test chain');

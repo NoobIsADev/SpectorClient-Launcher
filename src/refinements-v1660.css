@@ -1,0 +1,112 @@
+/* SpectorClient v1.6.60 — inline version dropdowns, no separate Versions view. */
+.version-picker-wrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  isolation: isolate;
+}
+.home-version-picker {
+  width: 100%;
+  height: 100%;
+}
+.home-version-picker .version-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 5px 19px 5px 7px;
+  line-height: 1.2;
+  border-left: 1px solid #343c49 !important;
+}
+.home-version-picker .version-button b {
+  font-size: clamp(13px, 1.2vw, 17px);
+  white-space: nowrap;
+}
+.version-picker-chevron {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  color: #9cceea;
+  pointer-events: none;
+  transition: transform .16s ease;
+}
+.version-picker-wrap > button[aria-expanded="true"] .version-picker-chevron {
+  transform: translateY(-50%) rotate(180deg);
+}
+.version-dropdown {
+  position: absolute;
+  z-index: 100;
+  right: 0;
+  width: max(232px, 100%);
+  min-width: 0;
+  max-height: min(320px, calc(100vh - 100px));
+  overflow-y: auto;
+  padding: 6px;
+  background: #171c26;
+  border: 1px solid #405366;
+  border-radius: 11px;
+  box-shadow: 0 16px 44px rgba(0,0,0,.70);
+}
+.home-version-picker .version-dropdown { bottom: calc(100% + 9px); }
+.mods-version-picker .version-dropdown { top: calc(100% + 8px); }
+.version-dropdown.hidden { display: none !important; }
+.version-dropdown-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #e5eefb;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+.version-dropdown-option + .version-dropdown-option { margin-top: 2px; }
+.version-dropdown-option:hover,
+.version-dropdown-option:focus-visible {
+  background: #273748;
+  border-color: #496b84;
+  outline: none;
+}
+.version-dropdown-option.active {
+  color: #f3faff;
+  background: rgb(var(--accent-rgb) / .13);
+  border-color: rgb(var(--accent-rgb) / .48);
+}
+.version-option-name { font-weight: 800; letter-spacing: .15px; }
+.version-option-loader { color: #97aabb; font-size: 10px; font-weight: 700; }
+.version-dropdown-option.active .version-option-loader { color: var(--ui-accent, #82d6ff); }
+.version-dropdown-option:focus-visible { box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / .30); }
+.mod-selected-version-row .mods-version-picker { z-index: 12; }
+.mods-version-picker .mod-switch-version {
+  position: relative;
+  display: inline-flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 31px 0 16px;
+  min-width: 149px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mods-version-picker .version-picker-chevron { right: 10px; }
+/* The old versions page and full-size chooser are intentionally absent. */
+@media (max-width: 840px) {
+  .home-version-picker .version-button b { font-size: 13px; }
+  .version-dropdown { width: max(206px, 100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-picker-chevron { transition: none; }
+}

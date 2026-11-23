@@ -1,3 +1,9 @@
+## v1.6.60 — Dropdown-only version switching
+
+The previous complete **v1.6.59** source archive is retained in Google Drive unchanged. To restore the old Versions sidebar/page, extract it into a separate directory; do not replace user Minecraft data, mods, account records, or settings. To keep newer backend updates while reverting only this UI later, restore v1.6.59 `src/index.html`, `src/renderer.js`, and their original navigation/version CSS, and remove `src/refinements-v1660.css` from the stylesheet links. Always publish a rollback under a new unused version/tag.
+
+---
+
 # Roll back SpectorClient Launcher v1.6.59 (Forge 1.8.9)
 
 The complete untouched previous version is `SpectorClient-Launcher-v1.6.58-Logs-Redesign-Full-Source.zip`, already saved on Google Drive. Use that archive to restore the previous three-edition launcher. Do **not** delete `APPDATA/spectorclient` or your version-specific `instances/1.8.9` data when switching source builds; remove only application binaries or source code if reverting. You can also switch among versions from the updated launcher without losing instance files.
@@ -83,3 +89,11 @@ An unchanged v1.6.53 complete-source backup is provided separately as `SpectorCl
 ## v1.6.55 Windows-only JVM fix rollback
 
 A complete untouched, byte-identical v1.6.54 source backup is supplied as `SpectorClient-Launcher-v1.6.54-ROLLBACK-BACKUP.zip`. The new launch behavior only gates the existing JVM argument handler to Windows Minecraft 26.3; it does not alter your installed Java, Minecraft versions, mods, user settings, images or accounts. To revert the change, use the v1.6.54 source in a separate folder. If publishing a rollback, bump the version to a new unused tag.
+
+
+### v1.6.61 rollback
+The untouched v1.6.60 full-source ZIP is the code rollback. Shared-world folder
+migrations change files in the user's game-data directory, so reverting code
+does not undo those on-disk changes. Back up SpectorClient data (especially
+`/saves`) before restoring a previous build. Each migrated world stays in the
+canonical root `saves` directory; keep those folders safe.

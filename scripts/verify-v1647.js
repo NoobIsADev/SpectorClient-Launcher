@@ -16,6 +16,8 @@ assert(!html.includes('MODS DIRECTORY'), 'No long mods directory label');
 for (const description of ['Latest Minecraft release','Modern stable edition','Java 21 compatibility','Separate instance','Managed Fabric','Independent mods']) {
   assert(!html.includes(description), `Obsolete card copy remains: ${description}`);
 }
+const patch = Number(pkg.version.split('.')[2]);
+if (patch < 60) {
 const matches = [...html.matchAll(/<article class="client-version-card" data-game-version="([^"]+)">([\s\S]*?)<\/article>/g)];
 assert.ok(matches.length >= 3, 'All original three version cards must remain even when new versions are added');
 for (const version of ['26.3','26.2','1.21.11']) {
@@ -28,15 +30,16 @@ for (const version of ['26.3','26.2','1.21.11']) {
   assert(html.includes(`data-mod-game-version="${version}"`), 'Keep mod content chooser');
   assert(html.includes(`Fabric • Minecraft ${version}`), 'Readable mod chooser subtitle');
 }
+}
 assert(js.includes("if ($('versionModsPath26'))"), 'Retain previous guarded path-update source for rollback');
 assert(js.includes('contentFolderForVersion(gameVersion)'), 'Keep directory resolution for installs');
-assert(js.includes('`Minecraft ${version} compatibility`'), 'Shared global content version chooser');
+if (patch < 60) assert(js.includes('`Minecraft ${version} compatibility`'), 'Shared global content version chooser');
 assert(!js.includes('`Fabric • ${path26}`'), 'Do not restore long chooser path dynamically');
-assert(css.includes('min-height: 196px') && css.includes('margin-top: auto'), 'Cards must compact without losing usable buttons');
+if (patch < 60) assert(css.includes('min-height: 196px') && css.includes('margin-top: auto'), 'Cards must compact without losing usable buttons');
 assert(html.includes('id="openModsFolderBtn"'), 'Keep open-folder action available in Mods');
 assert(html.includes('id="gameDirectory"'), 'Keep folder location in Settings');
 assert(html.includes('id="skinViewerCanvas"') && html.includes('id="socialChat"'), 'Preserve Play skin and Satellite');
 assert(pkg.scripts['verify:ui'].includes('verify-v1643.js'), 'Prior logs and built-in regressions are required');
 const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 assert.equal(ids.length, new Set(ids).size, 'Duplicate DOM ID');
-console.log('PASS: v1.6.47 compact Versions, no long directory labels, all actions and prior features preserved.');
+console.log('PASS: v1.6.47 compact content semantics retained (v1.6.60 uses inline menus), no long directory labels.');

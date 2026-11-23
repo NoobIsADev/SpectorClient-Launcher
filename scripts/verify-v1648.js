@@ -11,17 +11,24 @@ const renderer = read('src/renderer.js');
 const styles = read('src/refinements-v1648.css');
 const assets = read('scripts/fetch-brand.js');
 const pkg = require('../package.json');
+const patch = Number(pkg.version.split('.')[2]);
 assert(Number(pkg.version.split('.')[2]) >= 48, 'v1.6.48 logo/menu baseline must remain');
 assert(html.includes('<link rel="stylesheet" href="refinements-v1648.css" />'));
 assert.equal((html.match(/id="changeModVersionBtn"/g)||[]).length, 1);
-assert(html.includes('id="changeModVersionBtn"') && html.includes('>Change version</button>'));
+assert(html.includes('id="changeModVersionBtn"') && html.includes('Change version</span>'));
 assert(!html.includes('FABRIC CONTENT'), 'No Fabric Content badge');
 assert(!html.includes('class="mod-target-indicator"'), 'Remove badge markup');
 assert(html.includes('id="modSelectedVersionLabel" hidden'), 'Keep existing version state ID');
-assert(renderer.includes("$('changeModVersionBtn').textContent = 'Change version'"));
-assert(html.includes('id="modVersionChooser"'), 'Keep mod version selection');
+if (patch < 60) {
+  assert(renderer.includes("$('changeModVersionBtn').textContent = 'Change version'"));
+  assert(html.includes('id="modVersionChooser"'), 'Keep mod version selection');
+  assert(renderer.includes("$('modVersionChooser')?.classList.add('hidden')"));
+} else {
+  assert(html.includes('id="modsVersionMenu"'), 'Content dropdown replaces full chooser');
+  assert(!html.includes('id="modVersionChooser"'), 'Large chooser removed');
+  assert(renderer.includes('applyVersionDropdownSelection(kind, version)'));
+}
 assert(html.includes('id="modManagerContent"'), 'Keep mod list');
-assert(renderer.includes("$('modVersionChooser')?.classList.add('hidden')"));
 assert(styles.includes('background: transparent !important;'), 'Remove heavy background bars');
 assert(styles.includes('.version-featured-logo') && styles.includes('.rail-logo'), 'Center logos across menus');
 assert(assets.includes("const BRAND_URL = 'https://i.imgur.com/nP9aVFe.png'"), 'Preserve original logo URL');

@@ -1,3 +1,16 @@
+# SpectorClient Launcher v1.6.60 — Dropdown version selection
+
+- **Versions page removed** from the sidebar and source HTML. Use the compact version dropdown directly on the Play version button instead. No new settings or Minecraft instance migrations are required.
+- **Mods/Content switcher:** the existing **Change version** button now opens an inline dropdown rather than taking over the page with a large version-card chooser. Mods loads directly for the currently selected Play edition; choosing a different Content target **does not change the Play version**.
+- Both dropdowns use the launcher’s charcoal/cyan theme (including other selectable theme colors), indicate the current version, and list **26.3, 26.2, 1.21.11 (Fabric), and 1.8.9 (Forge)** using the actual supported-version list from the main process.
+- Dropdown behavior includes click-to-open, outside-click dismissal, Escape to close, arrow-key/Home/End navigation, and visible focus/selected states. Play selection saves through the original `settings:save` IPC; Content selection calls the existing `selectModsVersion()` path and maintains loader/version filters for Modrinth/CurseForge.
+- Removed long path text from the Mods header (Open Mods Folder still works). Forge 1.8.9 searching and legacy Java/mod handling remain unchanged, including **no Fabric API** for 1.8.9.
+- The original Electron launch backend, update/feed workflow, user accounts, Java runtimes, resource packs, shaders, Satellite, game process tracking, all other source files, and the original 4,454,146-byte Minecraft background remain preserved.
+- Verify with `npm run verify:ui` (all 17 suites) and `npm start` for a native Electron preview. The browser UI was checked using mocked IPC at 820×560, 1040×650, and 1440×900; no signed installers or real Minecraft launches were performed for this change.
+- Complete untouched **v1.6.59** ZIP is retained in Google Drive as a rollback source. Use a new release tag for any rollback instead of republishing existing tags.
+
+---
+
 # SpectorClient Launcher v1.6.59 — Minecraft 1.8.9 Forge support
 
 - Added an independent **Minecraft 1.8.9** edition to the Play version selector, Versions cards, and Mods version chooser; older editions (1.21.11, 26.2, 26.3) continue to use Fabric unchanged.
@@ -164,3 +177,30 @@ The untouched v1.6.44 complete source is separately available as `SpectorClient-
 ## v1.6.51 compact text-only header
 
 Removed the repeated small logo from the top bar and the decorative lower-left rail corner. The existing **SpectorClient** text wordmark occupies the former top-bar logo position, with extra left inset eliminated. The active-version logo within the Versions manager and all original branding assets are retained; no game logic, accounts, or build scripts were changed. The visual change is isolated in `src/refinements-v1651.css`.
+
+
+## v1.6.61 shared folders and saved worlds
+
+The Content page now has **Change version** beside **Open mods folder**. The two
+version selectors remain independent: changing Content compatibility does not
+change the Play selection.
+
+Minecraft 1.8.9 Forge now shares the same **config**, **spectorclient**,
+**resourcepacks**, **shaderpacks**, and **saves** directories as 1.21.11, 26.2,
+and 26.3. The shared canonical folders live in the SpectorClient data root and
+are exposed in each instance via a directory junction (Windows) or symlink
+(Linux/macOS). **Mods, Java runtimes and game libraries remain version-specific.**
+The legacy `options.txt` is intentionally separate because Minecraft 1.8.9
+would overwrite incompatible settings in modern Minecraft's `options.txt`;
+`servers.dat` remains shared.
+
+Existing worlds are moved into shared `saves` on first startup. If worlds
+from different version folders have the same folder name, each world is kept
+whole and the incoming folder is renamed with `(from VERSION)` rather than
+merging region files and level.dat from different worlds. Existing configs
+use the launcher's timestamped migration backups on filename collisions.
+
+**Warning:** Sharing the save directory does NOT make Minecraft world formats
+compatible. Never open a modern 1.21/26.x world in Minecraft 1.8.9, and keep
+independent world backups before switching versions. Minecraft may permanently
+convert or damage worlds when opened with another game version.

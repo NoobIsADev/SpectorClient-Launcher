@@ -204,7 +204,7 @@ function defaultSettings() {
 }
 
 const LEGACY_26_2_MIGRATION_MARKER = launcherDataPath('migration-26.2-to-instances-v1.json');
-const SHARED_INSTANCE_DIRECTORIES = Object.freeze(['config', 'spectorclient', 'resourcepacks', 'shaderpacks']);
+const SHARED_INSTANCE_DIRECTORIES = Object.freeze(['config', 'spectorclient', 'resourcepacks', 'shaderpacks', 'saves']);
 const SHARED_INSTANCE_FILES = Object.freeze(['options.txt', 'servers.dat', 'servers.dat_old']);
 const SHARED_INSTANCE_ENTRIES = Object.freeze([...SHARED_INSTANCE_DIRECTORIES, ...SHARED_INSTANCE_FILES]);
 const LEGACY_26_2_EXCLUDED_ROOT_ENTRIES = new Set(['launcher-data', 'runtime', 'instances', ...SHARED_INSTANCE_ENTRIES]);
@@ -403,6 +403,70 @@ async function mergeDirectoryIntoShared(source, destination, sourceLabel, entryN
   await fsp.rmdir(source).catch(() => {});
 }
 
+async function entryExistsWithoutFollowingLinks(filePath) {
+  try {
+    await fsp.lstat(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+// World folders are atomic units. Never merge individual level.dat, region or player
+// files from two different worlds which happen to share a folder name.
+// A name collision keeps the existing shared world untouched and renames the
+// newly imported world so neither save is lost.
+async function mergeWorldsIntoShared(source, destination, gameVersion) {
+  const sourceInfo = await fsp.lstat(source);
+  if (sourceInfo.isSymbolicLink()) {
+    throw new Error(`[Shared saves] ${source} is already a link to another location. Refusing to replace it automatically.`);
+  }
+  if (!sourceInfo.isDirectory()) {
+    throw new Error(`[Shared saves] ${source} is not a directory. Refusing to remove existing save data.`);
+  }
+
+  await fsp.mkdir(destination, { recursive: true });
+  const entries = await fsp.readdir(source);
+  for (const entryName of entries) {
+    const original = path.join(source, entryName);
+    let target = path.join(destination, entryName);
+    if (await entryExistsWithoutFollowingLinks(target)) {
+      const label = String(gameVersion).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const name = `${entryName} (from ${label})`;
+      target = path.join(destination, name);
+      let n = 2;
+      while (await entryExistsWithoutFollowingLinks(target)) {
+        target = path.join(destination, `${name} ${n++}`);
+      }
+      log(`[Shared saves] World folder ${entryName} already exists. Preserving ${gameVersion}'s world separately as ${path.basename(target)}.`, 'launcher');
+    }
+    await fsp.rename(original, target);
+  }
+  // rmdir fails if an entry could not be moved, rather than deleting user data.
+  await fsp.rmdir(source);
+}
+
+async function ensureSharedSavesForVersion(gameVersion) {
+  const shared = sharedInstancePath('saves');
+  const instanceEntry = instancePath(gameVersion, 'saves');
+  await fsp.mkdir(shared, { recursive: true });
+  if (await linkResolvesTo(instanceEntry, shared)) return;
+
+  // This operation is deliberately non-destructive; do not follow/remove an
+  // unrelated symbolic link or accidentally mix two worlds' level.dat files.
+  try {
+    await fsp.lstat(instanceEntry);
+    await mergeWorldsIntoShared(instanceEntry, shared, gameVersion);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+
+  await fsp.mkdir(path.dirname(instanceEntry), { recursive: true });
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  await fsp.symlink(shared, instanceEntry, linkType);
+}
+
 async function ensureSharedDirectoryForVersion(gameVersion, entryName) {
   const shared = sharedInstancePath(entryName);
   const instanceEntry = instancePath(gameVersion, entryName);
@@ -446,12 +510,15 @@ async function ensureSharedFileForVersion(gameVersion, entryName) {
 async function ensureSharedDataForVersion(gameVersion) {
   gameVersion = normalizeGameVersion(gameVersion);
   for (const entryName of SHARED_INSTANCE_DIRECTORIES) {
-    // Old Forge config and modern Fabric config must not overwrite each other.
-    if (gameVersion === '1.8.9' && entryName === 'config') continue;
-    await ensureSharedDirectoryForVersion(gameVersion, entryName);
+    // All versions, including legacy Forge 1.8.9, share the same directories.
+    // Treat saves specially: keep different worlds with the same name separate.
+    if (entryName === 'saves') await ensureSharedSavesForVersion(gameVersion);
+    else await ensureSharedDirectoryForVersion(gameVersion, entryName);
   }
   for (const entryName of SHARED_INSTANCE_FILES) {
     // Minecraft 1.8.9 cannot safely share options.txt with 1.21/26.x.
+    // The user's request to share folders is fulfilled without corrupting
+    // legacy/modern video, controls, or resource pack options.
     if (gameVersion === '1.8.9' && entryName === 'options.txt') continue;
     await ensureSharedFileForVersion(gameVersion, entryName);
   }
@@ -459,8 +526,9 @@ async function ensureSharedDataForVersion(gameVersion) {
 
 async function ensureSharedInstanceData() {
   // These live directly in the main SpectorClient directory and are presented
-  // inside every version instance. Config, SpectorClient data, resource packs and
-  // shader packs are shared; mods remain version-specific.
+  // inside every version instance, including 1.8.9 Forge. Config, SpectorClient
+  // data, resource packs, shader packs and saved worlds are shared; mods remain
+  // version-specific. Legacy options.txt stays separate for compatibility.
   for (const gameVersion of Object.keys(CLIENT_PROFILES)) {
     await ensureSharedDataForVersion(gameVersion);
   }
@@ -491,8 +559,8 @@ async function ensureDirs() {
       ]);
       await Promise.all(versionDirs);
 
-      // Keep only mods/version runtime data isolated. User settings that should
-      // follow the player between 26.2, 26.3 and 1.21.11 live in APPDATA_ROOT.
+      // Keep mods/version runtimes isolated while sharing config, saved worlds,
+      // resource packs, shader packs and SpectorClient data across all versions.
       await ensureSharedInstanceData();
       dirsInitialized = true;
     })();

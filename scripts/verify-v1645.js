@@ -8,12 +8,13 @@ const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'src/redesign-v1645.css'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'src/renderer.js'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
+const patch = Number(pkg.version.split('.')[2]);
 assert(Number(pkg.version.split('.')[2]) >= 45, 'Requires v1.6.45 UI baseline');
 const requiredIds = [
-  'view-home', 'view-mods', 'view-versions', 'view-accounts', 'view-settings', 'view-logs',
-  'playBtn', 'status', 'versionBtn', 'selectedVersionLabel', 'versionActiveName',
+  'view-home', 'view-mods', 'view-accounts', 'view-settings', 'view-logs',
+  'playBtn', 'status', 'versionBtn', 'selectedVersionLabel',
   'homeFeaturedVersion', 'accountSwitcher', 'topAccountName', 'minimizeBtn', 'maximizeBtn', 'closeBtn',
-  'modVersionChooser', 'modManagerContent', 'modSelectedVersionLabel', 'contentVersionQuestion',
+  'modManagerContent', 'modSelectedVersionLabel',
   'contentTypeButton', 'contentTypeMenu', 'contentTypeLabel', 'modSearchInput', 'modSearchBtn',
   'modSearchResults', 'modPagination', 'modInstallPanel', 'modInstalledPanel', 'installedMods',
   'socialMain', 'socialHome', 'socialChat', 'socialMessages', 'socialMessageForm',
@@ -22,11 +23,16 @@ const requiredIds = [
   'settingsSelectedVersion', 'openFolderRailBtn'
 ];
 for (const id of requiredIds) assert(html.includes(`id="${id}"`), `Missing functional UI ID ${id}`);
-for (const version of ['26.2','26.3','1.21.11']) {
-  assert(html.includes(`data-game-version="${version}"`));
-  assert(html.includes(`data-version-use="${version}"`));
-  assert(html.includes(`data-version-content="${version}"`));
-  assert(html.includes(`data-mod-game-version="${version}"`));
+if (patch < 60) {
+  for (const version of ['26.2','26.3','1.21.11']) {
+    assert(html.includes(`data-game-version="${version}"`));
+    assert(html.includes(`data-version-use="${version}"`));
+    assert(html.includes(`data-version-content="${version}"`));
+    assert(html.includes(`data-mod-game-version="${version}"`));
+  }
+} else {
+  for (const id of ['playVersionMenu', 'modsVersionMenu']) assert(html.includes(`id="${id}"`));
+  assert(renderer.includes('supportedGameVersions()') && renderer.includes('selectModsVersion(version)'));
 }
 for (const type of ['mods','resourcepacks','shaders']) {
   assert(html.includes(`data-content-type-shortcut="${type}"`));

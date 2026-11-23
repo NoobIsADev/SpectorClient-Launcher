@@ -1,0 +1,34 @@
+/* SpectorClient v1.6.61 — put the Content version dropdown beside the folder button. */
+#view-mods .content-page-head {
+  position: relative;
+  z-index: 14;
+  overflow: visible;
+}
+#view-mods .content-page-head .mod-context-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  min-width: 0;
+}
+#view-mods .content-page-head .mod-context-actions > #openModsFolderBtn,
+#view-mods .content-page-head .mod-context-actions .mod-switch-version {
+  min-height: 37px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+#view-mods .content-page-head .mods-version-picker { z-index: 15; }
+#view-mods .content-page-head .mods-version-picker .version-dropdown { top: calc(100% + 8px); right: 0; }
+#view-mods .content-quick-nav { position: relative; z-index: 1; }
+@media (max-width: 900px) {
+  #view-mods .content-page-head { flex-wrap: wrap; }
+  #view-mods .content-page-head .mod-context-actions { justify-content: flex-start; width: 100%; }
+  #view-mods .content-page-head .mod-context-actions > #openModsFolderBtn { flex: 0 1 auto; }
+}
+@media (max-width: 540px) {
+  #view-mods .content-page-head .mod-context-actions { gap: 7px; }
+  #view-mods .content-page-head .mod-context-actions > #openModsFolderBtn,
+  #view-mods .content-page-head .mod-context-actions .mod-switch-version { min-height: 35px; font-size: 10px; }
+}
