@@ -1,3 +1,23 @@
+## v1.6.63 — user-provided Steve skin with draggable 3D preview
+
+- `src/assets/steve-default.png` contains the **exact user-uploaded 64x64 PNG bytes**, SHA-256 `026b457125b520ab384990254bbbf9cb3415f06c5335ee9de7074c7c5dc96f6b` (no cropping, recompression, or image re-encoding of the actual skin texture).
+- The signed-out player uses the very same `skinview3d` canvas as signed-in players; drag with mouse or touch to rotate, with Steve/classic 4px arms. A small generated `src/steve-skin-data.js` contains those identical PNG bytes as a data URL so Chromium/WebGL can load it even if `file://` texture loading is restricted.
+- Regenerated `steve-head.png` and `steve-body.png` from this skin for static *fallback only*; they are not the 3D texture.
+- Existing grey SIGN IN button, Microsoft login, Minecraft launches, account skins, Modrinth/CurseForge, Satellite, and updater functionality preserved.
+- `refinements-v1663.css` prevents backgrounds/decorations from intercepting drag input.
+
+**Build/preview:** `npm install && npm start`; source checks: `npm run verify:ui`. Native Electron and 3D GPU runtime still need real-device verification.
+
+---
+
+## v1.6.62 — Satellite quiet mode and signed-out Steve
+
+- Satellite desktop notifications and incoming-message/friend-request toasts are suppressed during Minecraft launch preparation and while the Minecraft child process is running, then resume after it exits. Satellite friends, messages, realtime status and all non-Satellite notifications remain intact.
+- The signed-out Play-screen character and small account avatar now show a bundled Steve skin without internet access; the original 3D player renderer is used where available, with an offline paper-doll fallback.
+- Signed-out Play is a grey **SIGN IN** action that opens the existing Microsoft account login; after sign-in the normal themed Play control returns.
+- Satellite spelling is standardized across the UI.
+- All existing game versions, JVM arguments, shared data, mod management, updater and cross-platform packaging are preserved. Full regression checks: `npm run verify:ui`.
+
 # SpectorClient Launcher v1.6.60 — Dropdown version selection
 
 - **Versions page removed** from the sidebar and source HTML. Use the compact version dropdown directly on the Play version button instead. No new settings or Minecraft instance migrations are required.

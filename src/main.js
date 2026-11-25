@@ -1415,6 +1415,9 @@ async function showNotificationPermissionHelp() {
 
 
 function showNativeNotification(title, body, { version = '', kind = 'update' } = {}) {
+  // Never interrupt an active Minecraft session with Satellite notifications.
+  // Keep other notifications (updates / game lifecycle) on their existing path.
+  if (String(kind).startsWith('satellite-') && (isMinecraftRunning() || gameLaunchInProgress)) return false;
   if (!Notification.isSupported()) {
     log(`[Notifications] Desktop notification unavailable on ${process.platform}: ${title} — ${body}`, 'launcher');
     return false;
@@ -2078,7 +2081,7 @@ function satellitePresenceIsPlaying(presence) {
 }
 
 function satelliteDesktopNotificationsEnabled() {
-  return normalizeSocialPresenceMode(satelliteState.presenceMode) !== 'dnd';
+  return !gameLaunchInProgress && !isMinecraftRunning() && normalizeSocialPresenceMode(satelliteState.presenceMode) !== 'dnd';
 }
 
 function maybeNotifyFriendPresence(friend, previousPresence, nextPresence) {
@@ -2094,7 +2097,7 @@ function maybeNotifyFriendPresence(friend, previousPresence, nextPresence) {
   if (!wasPlaying && isPlaying && nextActivity.version) {
     showNativeNotification(
       'Friend Online',
-      `${friend.username} is now playing minecraft ${nextActivity.version}`,
+      `${friend.username} is now playing Minecraft ${nextActivity.version}`,
       { kind: 'satellite-friend-playing' }
     );
   }

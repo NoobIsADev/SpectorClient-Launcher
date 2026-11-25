@@ -18,6 +18,8 @@
   <link rel="stylesheet" href="refinements-v1659.css" />
   <link rel="stylesheet" href="refinements-v1660.css" />
   <link rel="stylesheet" href="refinements-v1661.css" />
+  <link rel="stylesheet" href="refinements-v1662.css" />
+  <link rel="stylesheet" href="refinements-v1663.css" />
 </head>
 <body>
   <div class="app-shell">
@@ -50,7 +52,7 @@
         <button type="button" id="friendsPanelToggle" class="friends-panel-toggle" aria-controls="right-rail" aria-expanded="false" aria-label="Open friends and messages" title="Open friends and messages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5c0 4.5-3.7 8-8.5 8-1.3 0-2.6-.3-3.6-.8L4 20l1-3.8c-.9-1.3-1.5-2.9-1.5-4.7 0-4.7 3.9-8.5 8.5-8.5s8 3.8 8 8.5Z"/></svg><span>Friends</span></button>
         <div class="account-switch-wrap">
           <button type="button" id="accountSwitcher" class="account-switcher" aria-label="Switch Minecraft account" aria-haspopup="true" aria-expanded="false">
-            <span id="topAccountAvatar" class="tiny-avatar placeholder">?</span>
+            <img id="topAccountAvatar" class="tiny-avatar" src="assets/steve-head.png" alt="Steve skin" />
             <span class="account-switch-copy"><small>ACCOUNT</small><b id="topAccountName">Sign in</b></span>
             <span class="chevron">⌄</span>
           </button>
@@ -78,17 +80,16 @@
             <div class="crystal crystal-one"></div>
             <div class="crystal crystal-two"></div>
             <div class="crystal crystal-three"></div>
-            <div id="skinPlaceholder" class="skin-placeholder">
-              <span>?</span>
-              <small>MICROSOFT ACCOUNT REQUIRED</small>
+            <div id="skinPlaceholder" class="skin-placeholder hidden" aria-label="Steve Minecraft character">
+              <img src="assets/steve-body.png" alt="Steve default Minecraft skin" />
             </div>
-            <canvas id="skinViewerCanvas" class="player-skin-viewer hidden" aria-label="Interactive Minecraft skin preview"></canvas>
+            <canvas id="skinViewerCanvas" class="player-skin-viewer hidden" aria-label="Minecraft character — drag to rotate" title="Drag to rotate your Minecraft character"></canvas>
             <img id="playerSkinFallback" class="player-skin hidden" alt="Minecraft skin" />
           </div>
 
           <div class="launch-zone">
             <div class="play-cluster">
-              <button id="playBtn" class="play-main" disabled><span class="play-icon">▶</span><span><b>PLAY</b><small id="playSubtext">Sign in with Microsoft first</small></span></button>
+              <button id="playBtn" class="play-main signed-out" type="button" aria-label="Sign in with Microsoft to play"><span class="play-icon"></span><span><b>SIGN IN</b><small id="playSubtext">Sign in with Microsoft to play</small></span></button>
               <div class="version-picker-wrap home-version-picker">
                 <button id="versionBtn" class="version-button" type="button" title="Choose Minecraft version" aria-label="Choose Minecraft version" aria-haspopup="listbox" aria-expanded="false" aria-controls="playVersionMenu"><small>VERSION</small><b id="selectedVersionLabel">26.2</b><svg class="version-picker-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
                 <div id="playVersionMenu" class="version-dropdown hidden" role="listbox" aria-label="Choose Minecraft version to play"></div>
@@ -490,6 +491,7 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="../node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
+  <script src="steve-skin-data.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

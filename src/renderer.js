@@ -185,9 +185,13 @@ function ensureSkinViewer() {
       height: 400,
       alpha: true
     });
+    // Both signed-in player skins and the bundled signed-out skin use this
+    // exact same interactive skinview3d canvas and drag-to-rotate controls.
+    skinViewer.controls.enabled = true;
     skinViewer.controls.enableRotate = true;
     skinViewer.controls.enableZoom = false;
     skinViewer.controls.enablePan = false;
+    canvas.style.touchAction = 'none';
     skinViewer.zoom = 0.82;
     skinViewer.fov = 55;
     skinViewer.autoRotate = false;
@@ -202,13 +206,19 @@ function ensureSkinViewer() {
 
 async function loadInteractiveSkin(account) {
   const viewer = ensureSkinViewer();
-  if (!viewer || !account) return false;
+  if (!viewer) return false;
   const serial = ++skinLoadSerial;
   try {
-    const dataUrl = await window.launcher.getSkinData(account.id);
+    // A bundled Steve texture gives signed-out users the same rotating 3D
+    // player preview, without relying on a Microsoft account or a CDN.
+    const dataUrl = account ? await window.launcher.getSkinData(account.id) : (globalThis.spectorDefaultSteveSkinDataUrl || 'assets/steve-default.png');
     if (serial !== skinLoadSerial || !dataUrl) return false;
-    await viewer.loadSkin(dataUrl);
+    // Keep Steve/classic-width arms for the user's 64x64 signed-out skin;
+    // signed-in players retain the exact previous account skin behaviour.
+    if (account) await viewer.loadSkin(dataUrl);
+    else await viewer.loadSkin(dataUrl, { model: 'default' });
     if (serial !== skinLoadSerial) return false;
+    viewer.controls.enabled = true;
     viewer.controls.enableRotate = true;
     viewer.controls.enableZoom = false;
     viewer.controls.enablePan = false;
@@ -862,14 +872,13 @@ function renderTopAccount() {
       img.replaceWith(fallback);
     };
     old.replaceWith(img);
-  } else if (!old.classList.contains('placeholder')) {
-    const fallback = document.createElement('span');
-    fallback.id = 'topAccountAvatar';
-    fallback.className = 'tiny-avatar placeholder';
-    fallback.textContent = '?';
-    old.replaceWith(fallback);
   } else {
-    old.textContent = '?';
+    const fallback = document.createElement('img');
+    fallback.id = 'topAccountAvatar';
+    fallback.className = 'tiny-avatar';
+    fallback.src = 'assets/steve-head.png';
+    fallback.alt = 'Default Steve skin';
+    old.replaceWith(fallback);
   }
 }
 
@@ -885,27 +894,22 @@ async function renderPlayer() {
   fallback.classList.add('hidden');
   fallback.removeAttribute('src');
 
-  if (!account) {
-    placeholder.classList.remove('hidden');
-    return;
-  }
-
   placeholder.classList.add('hidden');
   const loaded = await loadInteractiveSkin(account);
-  if (loaded && selectedAccount()?.id === account.id) {
+  if (loaded && selectedAccount()?.id === (account?.id || undefined)) {
     canvas.classList.remove('hidden');
     return;
   }
 
-  // Fallback only if the local 3D viewer cannot load.
+  // Local Steve image also works if WebGL/skinview3d is unavailable or offline.
+  // Signed-in players keep their account-specific fallback body preview.
+  if (selectedAccount()?.id !== (account?.id || undefined)) return;
   fallback.classList.remove('hidden');
-  fallback.src = skinBodyUrl(account);
-  fallback.alt = `${account.name}'s Minecraft skin`;
+  fallback.src = account ? skinBodyUrl(account) : 'assets/steve-body.png';
+  fallback.alt = account ? `${account.name}'s Minecraft skin` : 'Default Steve Minecraft skin';
   fallback.onerror = () => {
     fallback.classList.add('hidden');
     placeholder.classList.remove('hidden');
-    placeholder.querySelector('span').textContent = account.name.slice(0, 1).toUpperCase();
-    placeholder.querySelector('small').textContent = 'SKIN PREVIEW UNAVAILABLE';
   };
 }
 
@@ -1358,6 +1362,7 @@ function updatePlayState() {
   const displayVersion = gameRunning ? (runningGameVersion || selectedVersion) : selectedVersion;
 
   button.classList.toggle('stop-state', gameRunning || stoppingGame);
+  button.classList.toggle('signed-out', !account && !gameRunning && !launching);
 
   if (gameRunning) {
     button.disabled = stoppingGame;
@@ -1369,12 +1374,13 @@ function updatePlayState() {
     return;
   }
 
-  button.disabled = launching || !account;
-  icon.textContent = launching ? '…' : '▶';
-  label.textContent = launching ? 'STARTING…' : 'PLAY';
+  button.disabled = launching;
+  icon.textContent = !account ? '' : launching ? '…' : '▶';
+  label.textContent = !account ? 'SIGN IN' : launching ? 'STARTING…' : 'PLAY';
+  button.setAttribute('aria-label', !account ? 'Sign in with Microsoft to play' : 'Launch or stop Minecraft');
   $('playSubtext').textContent = account
     ? (launching ? `Preparing Minecraft ${displayVersion}…` : `Minecraft ${displayVersion} • ${account.name}`)
-    : 'Sign in with Microsoft first';
+    : 'Sign in with Microsoft to play';
 }
 
 async function saveSettings(showStatus = true) {
@@ -1842,6 +1848,10 @@ document.addEventListener('keydown', (event) => {
 });
 
 $('playBtn').addEventListener('click', async () => {
+  if (!gameRunning && !selectedAccount()) {
+    await startAddAccount();
+    return;
+  }
   if (gameRunning) {
     try {
       stoppingGame = true;
@@ -2260,6 +2270,10 @@ window.launcher.onSocialState((next) => {
   if (account && next.accountId) socialConnectAccountId = account.id;
   renderSocial();
 });
+function satelliteToastNotificationsEnabled() {
+  return !gameRunning && !launching && !stoppingGame;
+}
+
 window.launcher.onSocialEvent((packet) => {
   if (!packet?.type) return;
   if (packet.type === 'message.new' && packet.message) {
@@ -2272,7 +2286,7 @@ window.launcher.onSocialEvent((packet) => {
         renderSocialMessages();
       }
       if (String(message.to) === meId) window.launcher.markMessagesRead(socialChatUserId).catch(() => {});
-    } else if (String(message.to) === meId) {
+    } else if (String(message.to) === meId && satelliteToastNotificationsEnabled()) {
       const sender = socialFriendById(message.from);
       showToast(`${sender?.username || 'Friend'}: ${String(message.text || '').slice(0, 72)}`, 4200);
     }
@@ -2284,10 +2298,12 @@ window.launcher.onSocialEvent((packet) => {
       socialTypingTimer = setTimeout(() => $('socialTyping').classList.add('hidden'), 1800);
     }
   }
-  if (packet.type === 'friend.request') {
+  if (packet.type === 'friend.request' && satelliteToastNotificationsEnabled()) {
     showToast(`${packet.from?.username || 'Someone'} sent you a friend request.`, 3600);
   }
-  if (packet.type === 'friend.accepted') showToast(`${packet.user?.username || 'Friend'} accepted your request.`, 3200);
+  if (packet.type === 'friend.accepted' && satelliteToastNotificationsEnabled()) {
+    showToast(`${packet.user?.username || 'Friend'} accepted your request.`, 3200);
+  }
   if (packet.type === 'friend.removed' && socialChatUserId && String(packet.userId) === String(socialChatUserId)) closeSocialChat();
 });
 

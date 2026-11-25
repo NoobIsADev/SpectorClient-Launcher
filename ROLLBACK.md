@@ -1,3 +1,13 @@
+## v1.6.63 rollback
+
+The previous complete Electron-only v1.6.62 source remains available in Google Drive. Reverting to that full ZIP restores the prior Steve artwork and previous 3D input styling. This update does not modify game directories, accounts, saves, settings, mods, or player data.
+
+---
+
+## v1.6.62 rollback
+
+This release is built from the complete v1.6.61 source without deleting any previous files. To revert, use the original v1.6.61 source archive (saved separately) and rebuild/publish as a new version instead of reusing an existing GitHub release tag.
+
 ## v1.6.60 — Dropdown-only version switching
 
 The previous complete **v1.6.59** source archive is retained in Google Drive unchanged. To restore the old Versions sidebar/page, extract it into a separate directory; do not replace user Minecraft data, mods, account records, or settings. To keep newer backend updates while reverting only this UI later, restore v1.6.59 `src/index.html`, `src/renderer.js`, and their original navigation/version CSS, and remove `src/refinements-v1660.css` from the stylesheet links. Always publish a rollback under a new unused version/tag.

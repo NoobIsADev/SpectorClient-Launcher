@@ -1,0 +1,16 @@
+/* v1.6.63: custom signed-out skin is draggable via the normal 3D canvas. */
+#view-home #skinViewerCanvas:not(.hidden) {
+  pointer-events: auto !important;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  cursor: grab;
+}
+#view-home #skinViewerCanvas:not(.hidden):active { cursor: grabbing; }
+/* Decorative layers and the landscape never block pointer input. */
+#view-home .skin-scene-background,
+#view-home .skin-halo,
+#view-home .crystal,
+#view-home .skin-display::before,
+#view-home .skin-display::after { pointer-events: none; }

@@ -13,7 +13,7 @@ const html = fs.readFileSync(path.join(root, 'src/index.html'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'src/refinements-v1661.css'), 'utf8');
 const pkg = require('../package.json');
-assert.equal(pkg.version, '1.6.61');
+assert(Number(pkg.version.split('.')[2]) >= 61, 'v1.6.61 shared-folder behavior retained');
 assert(pkg.scripts['verify:ui'].includes('verify-v1659.js'));
 assert(pkg.scripts['verify:ui'].includes('verify-v1660.js'));
 assert(pkg.scripts['verify:ui'].includes('verify-v1661.js'));
